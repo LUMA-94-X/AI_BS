@@ -152,17 +152,14 @@ try:
     monthly_df = parser.get_monthly_summary()
 
     if not monthly_df.empty:
-        # Zeige als Tabelle
-        st.dataframe(
-            monthly_df.style.format({
-                'Heizung_kWh': '{:.1f}',
-                'Kuehlung_kWh': '{:.1f}',
-                'Beleuchtung_kWh': '{:.1f}',
-                'Geraete_kWh': '{:.1f}',
-                'Gesamt_kWh': '{:.1f}',
-            }),
-            use_container_width=True,
-        )
+        # Formatiere Zahlen
+        monthly_df_formatted = monthly_df.copy()
+        for col in ['Heizung_kWh', 'Kuehlung_kWh', 'Beleuchtung_kWh', 'Geraete_kWh', 'Gesamt_kWh']:
+            if col in monthly_df_formatted.columns:
+                monthly_df_formatted[col] = monthly_df_formatted[col].apply(lambda x: f"{x:.1f}")
+
+        # Zeige als Tabelle (ohne pyarrow)
+        st.table(monthly_df_formatted)
 
         # Balkendiagramm
         import plotly.express as px
