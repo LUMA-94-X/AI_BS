@@ -259,6 +259,16 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
                 # Erfolgs-Meldung
                 st.balloons()
                 error_file = result.output_dir / "eplusout.err"
+
+                # Prüfe auf verdächtig kurze Simulationszeit
+                if elapsed_time < 5.0:
+                    st.warning(f"""
+                    ⚠️ **Achtung:** Die Simulation war sehr schnell ({elapsed_time:.1f}s).
+                    Eine vollständige Jahressimulation dauert normalerweise 10-30 Sekunden.
+
+                    Bitte prüfen Sie die Ergebnis-Logs im Expander unten.
+                    """)
+
                 st.success(f"""
                 ### 🎉 Simulation erfolgreich abgeschlossen!
 
@@ -269,6 +279,27 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
                 - SQL-Datenbank: `{result.sql_file}`
                 - Fehler-Log: `{error_file}`
                 """)
+
+                # Zeige err file Info
+                if error_file.exists():
+                    err_size = error_file.stat().st_size
+                    if err_size == 0:
+                        st.warning("""
+                        ⚠️ **Ungewöhnlich:** Die Fehler-Datei ist leer (0 Bytes).
+                        EnergyPlus sollte normalerweise immer etwas ins Error-Log schreiben.
+                        Dies kann auf ein Problem bei der Ausführung hinweisen.
+                        """)
+
+                # Zeige Log-Dateien als Expander
+                with st.expander("📄 Simulation Logs (Error File)"):
+                    if error_file.exists() and error_file.stat().st_size > 0:
+                        with open(error_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            err_content = f.read()
+                            st.code(err_content, language="text")
+                    elif error_file.exists():
+                        st.warning("Error-Datei ist leer (0 Bytes)")
+                    else:
+                        st.error("Error-Datei nicht gefunden")
 
                 # Navigation
                 st.markdown("---")

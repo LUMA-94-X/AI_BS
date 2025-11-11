@@ -233,6 +233,7 @@ class EnergyPlusRunner:
         start_time = datetime.now()
         try:
             # Run EnergyPlus
+            logger.info(f"Running EnergyPlus command: {' '.join(cmd)}")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -243,13 +244,41 @@ class EnergyPlusRunner:
 
             execution_time = (datetime.now() - start_time).total_seconds()
 
+            # Log EnergyPlus output
+            logger.info(f"EnergyPlus return code: {result.returncode}")
+            logger.info(f"EnergyPlus execution time: {execution_time:.2f}s")
+
+            if result.stdout:
+                logger.debug(f"EnergyPlus stdout (first 2000 chars):\n{result.stdout[:2000]}")
+            if result.stderr:
+                logger.warning(f"EnergyPlus stderr:\n{result.stderr}")
+
             # Check for errors
             err_file = output_dir / f"{output_prefix}out.err"
+
+            # Log err file info for debugging
+            if err_file.exists():
+                err_size = err_file.stat().st_size
+                logger.info(f"Error file size: {err_size} bytes")
+                if err_size == 0:
+                    logger.warning("ERROR FILE IS EMPTY (0 bytes) - This is unusual!")
+                    logger.warning("EnergyPlus should always write to the error file.")
+                    logger.warning("Check: 1) Was EnergyPlus actually executed? 2) File permissions? 3) Disk space?")
+            else:
+                logger.warning(f"Error file does not exist: {err_file}")
+
             success = self._check_simulation_success(err_file)
 
             # Collect output files
             sql_file = output_dir / f"{output_prefix}out.sql"
             csv_files = list(output_dir.glob("*.csv"))
+
+            # Log SQL file info
+            if sql_file.exists():
+                sql_size = sql_file.stat().st_size
+                logger.info(f"SQL file size: {sql_size:,} bytes")
+                if sql_size < 500_000:  # Less than 500KB is suspiciously small for annual simulation
+                    logger.warning(f"SQL file is very small ({sql_size:,} bytes) - Expected >1MB for annual simulation")
 
             if not success:
                 error_msg = self._extract_error_message(err_file)
@@ -408,7 +437,7 @@ class EnergyPlusRunner:
     def _cleanup_intermediate_files(self, output_dir: Path, prefix: str) -> None:
         """Remove intermediate files, keeping only essential outputs."""
         # Files to keep
-        keep_extensions = {'.sql', '.csv', '.err', '.htm', '.html'}
+        keep_extensions = {'.sql', '.csv', '.err', '.htm', '.html', '.idf'}
 
         for file in output_dir.iterdir():
             if file.is_file() and file.suffix not in keep_extensions:
