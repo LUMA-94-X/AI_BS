@@ -120,8 +120,8 @@ class FiveZoneGenerator:
         idd_file = self._get_idd_file()
         IDF.setiddname(idd_file)
 
-        # Create minimal IDF template
-        minimal_idf_content = "VERSION,\n  23.2;\n"
+        # Create minimal IDF template with correct version (25.1 for EnergyPlus V25-1-0)
+        minimal_idf_content = "VERSION,\n  25.1;\n"
         with tempfile.NamedTemporaryFile(mode='w', suffix='.idf', delete=False) as f:
             f.write(minimal_idf_content)
             temp_idf_path = f.name
@@ -203,13 +203,15 @@ class FiveZoneGenerator:
         """Fügt Simulation Control, Building, Timestep, etc. hinzu."""
 
         # SimulationControl
+        # NOTE: Zone/System Sizing auf No, da IdealLoads verwendet wird (braucht kein Sizing)
+        # Nur Annual Simulation (Weather File Run Periods) wird ausgeführt
         idf.newidfobject(
             "SIMULATIONCONTROL",
-            Do_Zone_Sizing_Calculation="Yes",
-            Do_System_Sizing_Calculation="Yes",
+            Do_Zone_Sizing_Calculation="No",  # Disabled: IdealLoads braucht kein Sizing
+            Do_System_Sizing_Calculation="No",  # Disabled: IdealLoads braucht kein Sizing
             Do_Plant_Sizing_Calculation="No",
             Run_Simulation_for_Sizing_Periods="No",
-            Run_Simulation_for_Weather_File_Run_Periods="Yes",
+            Run_Simulation_for_Weather_File_Run_Periods="Yes",  # ENABLED: Annual Simulation!
         )
 
         # HeatBalanceAlgorithm
@@ -364,30 +366,8 @@ class FiveZoneGenerator:
                     Part_of_Total_Floor_Area="Yes",
                 )
 
-                # Sizing:Zone für HVAC
-                idf.newidfobject(
-                    "SIZING:ZONE",
-                    Zone_or_ZoneList_Name=zone_geom.name,
-                    Zone_Cooling_Design_Supply_Air_Temperature_Input_Method="SupplyAirTemperature",
-                    Zone_Cooling_Design_Supply_Air_Temperature=13.0,
-                    Zone_Heating_Design_Supply_Air_Temperature_Input_Method="SupplyAirTemperature",
-                    Zone_Heating_Design_Supply_Air_Temperature=50.0,
-                    Zone_Cooling_Design_Supply_Air_Humidity_Ratio=0.008,
-                    Zone_Heating_Design_Supply_Air_Humidity_Ratio=0.008,
-                    Design_Specification_Outdoor_Air_Object_Name="",
-                    Zone_Heating_Sizing_Factor="",
-                    Zone_Cooling_Sizing_Factor="",
-                    Cooling_Design_Air_Flow_Method="DesignDay",
-                    Cooling_Design_Air_Flow_Rate=0.0,
-                    Cooling_Minimum_Air_Flow_per_Zone_Floor_Area="",
-                    Cooling_Minimum_Air_Flow="",
-                    Cooling_Minimum_Air_Flow_Fraction="",
-                    Heating_Design_Air_Flow_Method="DesignDay",
-                    Heating_Design_Air_Flow_Rate=0.0,
-                    Heating_Maximum_Air_Flow_per_Zone_Floor_Area="",
-                    Heating_Maximum_Air_Flow="",
-                    Heating_Maximum_Air_Flow_Fraction="",
-                )
+                # HINWEIS: SIZING:ZONE nicht mehr erstellt, da Sizing deaktiviert ist
+                # (IdealLoads braucht kein Sizing, Annual Simulation läuft ohne)
 
     # ========================================================================
     # SURFACES (WALLS, FLOORS, CEILINGS, WINDOWS)
