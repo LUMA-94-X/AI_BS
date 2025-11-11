@@ -110,17 +110,21 @@ class EnergyPlusRunner:
                 logger.warning(f"Could not copy IDD file: {e}")
 
         try:
+            # Convert WSL path to Windows path for ExpandObjects.exe
+            output_dir_for_expand = self._convert_wsl_to_windows_path(output_dir)
+
             # Run ExpandObjects (it reads in.idf and creates expanded.idf)
             # Use absolute path and shell=True for Windows compatibility
             import platform
             use_shell = platform.system() == "Windows"
 
             logger.info(f"Running: {self.expand_objects_exe}")
-            logger.info(f"Working directory: {output_dir}")
+            logger.info(f"Working directory (WSL): {output_dir}")
+            logger.info(f"Working directory (Win): {output_dir_for_expand}")
 
             result = subprocess.run(
                 [str(self.expand_objects_exe.resolve())],
-                cwd=str(output_dir),
+                cwd=str(output_dir_for_expand),
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -151,6 +155,44 @@ class EnergyPlusRunner:
             import traceback
             logger.error(traceback.format_exc())
             return None
+
+    def _convert_wsl_to_windows_path(self, path: Path) -> Path:
+        """Convert WSL path to Windows path for Windows executables.
+
+        WSL paths like /mnt/c/Users/... need to be converted to C:/Users/...
+        for Windows applications like energyplus.exe to understand them.
+        """
+        import platform
+        import subprocess
+
+        # Only convert on WSL
+        if platform.system() != "Linux":
+            return path
+
+        # Check if running in WSL
+        try:
+            with open('/proc/version', 'r') as f:
+                if 'microsoft' not in f.read().lower():
+                    return path  # Not WSL, regular Linux
+        except:
+            return path
+
+        # Convert using wslpath command
+        try:
+            result = subprocess.run(
+                ['wslpath', '-w', str(path.absolute())],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                windows_path = result.stdout.strip()
+                logger.info(f"Converted WSL path: {path} -> {windows_path}")
+                return Path(windows_path)
+        except Exception as e:
+            logger.warning(f"Could not convert WSL path: {e}")
+
+        return path
 
     def run_simulation(
         self,
@@ -221,22 +263,30 @@ class EnergyPlusRunner:
             idf_path = expanded_idf
             logger.info(f"Using expanded IDF: {idf_path.name}")
 
+        # Convert paths for Windows EnergyPlus if running in WSL
+        idf_path_for_eplus = self._convert_wsl_to_windows_path(idf_path.absolute())
+        weather_file_for_eplus = self._convert_wsl_to_windows_path(weather_file.absolute())
+        output_dir_for_eplus = self._convert_wsl_to_windows_path(output_dir.absolute())
+
         # Prepare EnergyPlus command
         cmd = [
             str(self.energyplus_exe),
-            "--weather", str(weather_file.absolute()),
-            "--output-directory", str(output_dir.absolute()),
+            "--weather", str(weather_file_for_eplus),
+            "--output-directory", str(output_dir_for_eplus),
             "--output-prefix", output_prefix,
-            str(idf_path.absolute()),
+            str(idf_path_for_eplus),
         ]
 
         logger.info("="*80)
         logger.info("ENERGYPLUS COMMAND")
         logger.info("="*80)
         logger.info(f"Executable: {self.energyplus_exe}")
-        logger.info(f"Working dir: {output_dir}")
-        logger.info(f"IDF file: {idf_path}")
-        logger.info(f"Weather file: {weather_file}")
+        logger.info(f"Working dir (WSL): {output_dir}")
+        logger.info(f"Working dir (Win): {output_dir_for_eplus}")
+        logger.info(f"IDF file (WSL): {idf_path}")
+        logger.info(f"IDF file (Win): {idf_path_for_eplus}")
+        logger.info(f"Weather file (WSL): {weather_file}")
+        logger.info(f"Weather file (Win): {weather_file_for_eplus}")
         logger.info(f"Full command: {' '.join(cmd)}")
         logger.info("="*80)
 
@@ -249,7 +299,7 @@ class EnergyPlusRunner:
                 capture_output=True,
                 text=True,
                 timeout=self.config.simulation.timeout,
-                cwd=str(output_dir.absolute()),
+                cwd=str(output_dir_for_eplus),
             )
             logger.info("EnergyPlus subprocess completed.")
 
