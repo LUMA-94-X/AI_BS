@@ -133,6 +133,8 @@ class FiveZoneGenerator:
 
     def _get_idd_file(self) -> str:
         """Gibt Pfad zur IDD-Datei zurück."""
+        import os
+
         ep_path_str = self.config.energyplus.installation_path
 
         # Konvertiere Windows-Pfad zu WSL-Pfad falls nötig
@@ -144,9 +146,18 @@ class FiveZoneGenerator:
 
         if not idd_path.exists():
             # Use as_posix() to ensure forward slashes in error message
+            # Add detailed debug info
             raise FileNotFoundError(
                 f"IDD file not found at {idd_path.as_posix()}. "
-                f"Check EnergyPlus installation path in config."
+                f"Check EnergyPlus installation path in config.\n"
+                f"Debug Info:\n"
+                f"  Original config path: {self.config.energyplus.installation_path}\n"
+                f"  Converted path: {ep_path_str}\n"
+                f"  IDD path (posix): {idd_path.as_posix()}\n"
+                f"  IDD path (str): {str(idd_path)}\n"
+                f"  Working directory: {os.getcwd()}\n"
+                f"  Path exists check: {idd_path.exists()}\n"
+                f"  os.path.exists check: {os.path.exists(str(idd_path))}"
             )
 
         # Use as_posix() to ensure forward slashes for WSL/Linux compatibility

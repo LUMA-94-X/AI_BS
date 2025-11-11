@@ -2,6 +2,7 @@
 
 import streamlit as st
 import sys
+import os
 from pathlib import Path
 
 # Projekt-Root zum Path hinzufügen
@@ -320,6 +321,19 @@ with col3:
             if st.button("🚀 5-Zone-IDF erstellen", type="primary"):
                 with st.spinner("Erstelle 5-Zone-Modell..."):
                     try:
+                        # Debug-Info
+                        from core.config import get_config
+                        import os
+                        config = get_config()
+
+                        with st.expander("🔍 Debug-Info", expanded=False):
+                            st.code(f"""
+Installation Path (config): {config.energyplus.installation_path}
+Working Directory: {os.getcwd()}
+Python Executable: {sys.executable}
+Platform: {os.name}
+                            """)
+
                         generator = FiveZoneGenerator()
 
                         output_dir = Path(__file__).parent.parent.parent.parent / "output" / "energieausweis"
