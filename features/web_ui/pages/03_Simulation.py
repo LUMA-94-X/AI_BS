@@ -204,10 +204,21 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
                 progress_bar.progress(40)
 
             # Ab hier gemeinsam für beide Workflows
-            status_text.info("▶️ Starte EnergyPlus-Simulation...")
+            status_text.info("▶️ Bereite Simulation vor...")
 
             # Schritt 3: Simulation ausführen
             runner = EnergyPlusRunner()
+
+            # Debug: Prüfe ob ExpandObjects vorhanden
+            if runner.expand_objects_exe.exists():
+                status_text.info(f"✓ ExpandObjects gefunden: {runner.expand_objects_exe.name}")
+            else:
+                status_text.warning(f"⚠️ ExpandObjects nicht gefunden")
+
+            # Debug: Prüfe ob HVACTemplate im IDF
+            if runner._needs_expand_objects(idf_path):
+                status_text.info("⚙️ HVACTemplate-Objekte gefunden - ExpandObjects wird ausgeführt...")
+
             start_time = time.time()
 
             result = runner.run_simulation(

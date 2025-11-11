@@ -87,34 +87,60 @@ class EnergyPlusRunner:
 
         logger.info("Running ExpandObjects to expand HVACTemplate objects...")
 
+        # Ensure absolute paths
+        idf_path = idf_path.resolve()
+        output_dir = output_dir.resolve()
+
         # Copy IDF to output directory (ExpandObjects expects in.idf)
         in_idf = output_dir / "in.idf"
-        shutil.copy(idf_path, in_idf)
+        try:
+            shutil.copy(str(idf_path), str(in_idf))
+            logger.info(f"Copied IDF to: {in_idf}")
+        except Exception as e:
+            logger.error(f"Could not copy IDF: {e}")
+            return None
 
         # Also need Energy+.idd in same directory
         idd_file = self.energyplus_exe.parent / "Energy+.idd"
         if idd_file.exists():
-            shutil.copy(idd_file, output_dir / "Energy+.idd")
+            try:
+                shutil.copy(str(idd_file), str(output_dir / "Energy+.idd"))
+                logger.info("Copied Energy+.idd")
+            except Exception as e:
+                logger.warning(f"Could not copy IDD file: {e}")
 
         try:
             # Run ExpandObjects (it reads in.idf and creates expanded.idf)
+            # Use absolute path and shell=True for Windows compatibility
+            import platform
+            use_shell = platform.system() == "Windows"
+
+            logger.info(f"Running: {self.expand_objects_exe}")
+            logger.info(f"Working directory: {output_dir}")
+
             result = subprocess.run(
-                [str(self.expand_objects_exe)],
+                [str(self.expand_objects_exe.resolve())],
                 cwd=str(output_dir),
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=60,
+                shell=use_shell
             )
+
+            logger.info(f"ExpandObjects return code: {result.returncode}")
+            if result.stdout:
+                logger.info(f"ExpandObjects stdout: {result.stdout}")
+            if result.stderr:
+                logger.warning(f"ExpandObjects stderr: {result.stderr}")
 
             # Check for expanded.idf
             expanded_idf = output_dir / "expanded.idf"
             if expanded_idf.exists():
-                logger.info("ExpandObjects completed successfully")
+                logger.info(f"ExpandObjects completed successfully: {expanded_idf}")
                 return expanded_idf
             else:
                 logger.error("ExpandObjects did not create expanded.idf")
-                logger.error(f"ExpandObjects output: {result.stdout}")
-                logger.error(f"ExpandObjects errors: {result.stderr}")
+                logger.error(f"Files in output dir: {list(output_dir.glob('*'))}")
                 return None
 
         except subprocess.TimeoutExpired:
@@ -122,6 +148,8 @@ class EnergyPlusRunner:
             return None
         except Exception as e:
             logger.error(f"ExpandObjects error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
 
     def run_simulation(
