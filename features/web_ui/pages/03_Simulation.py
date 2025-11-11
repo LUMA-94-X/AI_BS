@@ -166,6 +166,7 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
                 # IDF aus Session State oder neu laden
                 if 'idf' in st.session_state:
                     idf = st.session_state['idf']
+                    status_text.info("✓ IDF aus Session State geladen")
                 else:
                     from core.config import get_config
                     config = get_config()
@@ -174,12 +175,28 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
                     idd_file = generator._get_idd_file()
                     IDF.setiddname(idd_file)
                     idf = IDF(str(source_idf_path))
+                    status_text.info("✓ IDF von Datei geladen")
 
                 # Kopiere IDF in Output-Verzeichnis
-                idf.save(str(idf_path))
+                try:
+                    import shutil
+                    # Einfach Datei kopieren statt eppy save (robuster)
+                    shutil.copy(str(source_idf_path), str(idf_path))
+                    status_text.info(f"✓ IDF kopiert nach: {idf_path.name}")
+
+                    # Prüfe ob Datei existiert
+                    if not idf_path.exists():
+                        st.error(f"❌ IDF-Kopie fehlgeschlagen: {idf_path} existiert nicht!")
+                        st.stop()
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Kopieren der IDF-Datei: {e}")
+                    import traceback
+                    with st.expander("🐛 Fehlerdetails"):
+                        st.code(traceback.format_exc())
+                    st.stop()
 
                 progress_bar.progress(40)
-                status_text.info(f"✅ 5-Zone-IDF geladen ({building_model.num_zones} Zonen)")
+                status_text.info(f"✅ 5-Zone-IDF bereit ({building_model.num_zones} Zonen)")
 
             else:
                 # SimpleBox: IDF on-the-fly erstellen
