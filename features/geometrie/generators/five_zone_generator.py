@@ -143,12 +143,14 @@ class FiveZoneGenerator:
         idd_path = ep_path / "Energy+.idd"
 
         if not idd_path.exists():
+            # Use as_posix() to ensure forward slashes in error message
             raise FileNotFoundError(
-                f"IDD file not found at {idd_path}. "
+                f"IDD file not found at {idd_path.as_posix()}. "
                 f"Check EnergyPlus installation path in config."
             )
 
-        return str(idd_path)
+        # Use as_posix() to ensure forward slashes for WSL/Linux compatibility
+        return idd_path.as_posix()
 
     # ========================================================================
     # MATERIALS & CONSTRUCTIONS
