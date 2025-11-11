@@ -7,6 +7,10 @@ from pathlib import Path
 # Projekt-Root zum Path hinzufügen
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
+from core.building_model import get_building_model_from_session, save_building_model_to_session
+from features.hvac.ideal_loads import create_building_with_hvac
+from eppy.modeleditor import IDF
+
 st.set_page_config(
     page_title="HVAC - Gebäudesimulation",
     page_icon="❄️",
@@ -16,10 +20,36 @@ st.set_page_config(
 st.title("❄️ HVAC-System")
 st.markdown("---")
 
-# Prüfe ob Geometrie vorhanden ist
-if 'geometry' not in st.session_state:
-    st.warning("⚠️ Bitte definieren Sie zuerst die Geometrie auf der **Geometrie-Seite**.")
+# Prüfe ob Geometrie ODER BuildingModel vorhanden ist
+building_model = get_building_model_from_session(st.session_state)
+has_geometry = 'geometry' in st.session_state
+
+if not building_model and not has_geometry:
+    st.warning("⚠️ Bitte definieren Sie zuerst ein Gebäudemodell:\n- **Energieausweis-Seite** für 5-Zone-Modell (empfohlen)\n- **Geometrie-Seite** für SimpleBox")
     st.stop()
+
+# Kontextuelle Info: Welches Modell wird konfiguriert?
+if building_model:
+    if building_model.source == "energieausweis":
+        st.info(f"""
+        🏗️ **5-Zone-Modell aus Energieausweis**
+        - Gebäudetyp: {building_model.gebaeudetyp}
+        - Zonen: {building_model.num_zones}
+        - Fläche: {building_model.geometry_summary.get('total_floor_area', 0):.0f} m²
+        """)
+    else:
+        st.info(f"""
+        📦 **SimpleBox-Modell**
+        - Zonen: {building_model.num_zones}
+        - Abmessungen: {building_model.geometry_summary['length']:.1f}m × {building_model.geometry_summary['width']:.1f}m × {building_model.geometry_summary['height']:.1f}m
+        """)
+elif has_geometry:
+    # Legacy: Falls nur geometry vorhanden (alte Sessions)
+    geom = st.session_state['geometry']
+    st.info(f"""
+    📦 **SimpleBox-Modell** (Legacy)
+    - Abmessungen: {geom.length:.1f}m × {geom.width:.1f}m × {geom.height:.1f}m
+    """)
 
 # Info-Box
 st.info("""
@@ -138,6 +168,57 @@ if hvac_type == "Ideal Loads Air System":
         'outdoor_air': outdoor_air,
         'air_change_rate': air_change_rate,
     }
+
+    # Für 5-Zone-Modelle: HVAC direkt zum IDF hinzufügen
+    if building_model and building_model.source == "energieausweis":
+        st.markdown("---")
+        st.subheader("🔧 HVAC zum IDF hinzufügen")
+
+        if st.button("✅ HVAC-System jetzt konfigurieren", type="primary"):
+            with st.spinner(f"Füge HVAC zu {building_model.num_zones} Zonen hinzu..."):
+                try:
+                    # IDF laden
+                    idf_path = building_model.idf_path
+                    if not idf_path.exists():
+                        st.error(f"❌ IDF-Datei nicht gefunden: {idf_path}")
+                        st.stop()
+
+                    # IDF-Objekt aus Session State oder neu laden
+                    if 'idf' in st.session_state:
+                        idf = st.session_state['idf']
+                    else:
+                        from core.config import get_config
+                        config = get_config()
+                        from features.geometrie.generators.five_zone_generator import FiveZoneGenerator
+                        generator = FiveZoneGenerator(config)
+                        idd_file = generator._get_idd_file()
+                        IDF.setiddname(idd_file)
+                        idf = IDF(str(idf_path))
+
+                    # HVAC hinzufügen
+                    idf = create_building_with_hvac(idf)
+
+                    # IDF speichern
+                    idf.save(str(idf_path))
+
+                    # Session State aktualisieren
+                    st.session_state['idf'] = idf
+
+                    # BuildingModel aktualisieren (has_hvac = True)
+                    building_model.has_hvac = True
+                    save_building_model_to_session(st.session_state, building_model)
+
+                    st.success(f"✅ HVAC erfolgreich zu {building_model.num_zones} Zonen hinzugefügt!")
+                    st.info("➡️ Sie können nun zur **Simulation-Seite** gehen.")
+
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Hinzufügen von HVAC: {e}")
+                    import traceback
+                    with st.expander("🐛 Fehlerdetails"):
+                        st.code(traceback.format_exc())
+
+        if building_model.has_hvac:
+            st.success("✅ HVAC bereits konfiguriert! Sie können zur Simulation-Seite gehen.")
 
 # Zusammenfassung
 st.markdown("---")

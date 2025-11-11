@@ -18,6 +18,7 @@ from features.geometrie.utils.geometry_solver import (
     GeometrySolver,
     print_solution_summary
 )
+from core.building_model import BuildingModel, save_building_model_to_session
 
 st.set_page_config(
     page_title="Energieausweis - 5-Zone-Modell",
@@ -356,6 +357,17 @@ Platform: {os.name}
                         st.session_state['idf'] = idf
                         st.session_state['idf_path'] = output_path
                         st.session_state['geometry_source'] = 'energieausweis'
+
+                        # BuildingModel erstellen und speichern
+                        geo_solution = st.session_state.get('geo_solution')
+                        if geo_solution:
+                            building_model = BuildingModel.from_energieausweis(
+                                geo_solution=geo_solution,
+                                ea_data=ea_input,
+                                idf_path=output_path,
+                                num_zones=len(zones)
+                            )
+                            save_building_model_to_session(st.session_state, building_model)
 
                         # Statistiken anzeigen
                         col_s1, col_s2, col_s3 = st.columns(3)

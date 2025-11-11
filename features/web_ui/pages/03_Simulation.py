@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from features.geometrie.box_generator import SimpleBoxGenerator
 from features.hvac.ideal_loads import create_building_with_hvac
 from features.simulation.runner import EnergyPlusRunner
+from core.building_model import get_building_model_from_session
+from eppy.modeleditor import IDF
 
 st.set_page_config(
     page_title="Simulation - Gebäudesimulation",
@@ -22,12 +24,26 @@ st.set_page_config(
 st.title("▶️ Simulation starten")
 st.markdown("---")
 
-# Prüfe ob Geometrie und HVAC konfiguriert sind
-if 'geometry' not in st.session_state:
-    st.warning("⚠️ Bitte definieren Sie zuerst die **Geometrie**.")
+# Prüfe ob Gebäudemodell ODER Geometrie vorhanden ist
+building_model = get_building_model_from_session(st.session_state)
+has_geometry = 'geometry' in st.session_state
+
+if not building_model and not has_geometry:
+    st.warning("⚠️ Bitte definieren Sie zuerst ein Gebäudemodell:\n- **Energieausweis-Seite** für 5-Zone-Modell (empfohlen)\n- **Geometrie-Seite** für SimpleBox")
     st.stop()
 
-if 'hvac_config' not in st.session_state:
+# Prüfe HVAC-Konfiguration
+# Für 5-Zone: HVAC muss im IDF sein (has_hvac = True)
+# Für SimpleBox: hvac_config reicht
+if building_model:
+    if building_model.source == "energieausweis" and not building_model.has_hvac:
+        st.warning("⚠️ Bitte konfigurieren Sie zuerst das **HVAC-System** auf der HVAC-Seite.")
+        st.stop()
+    elif building_model.source == "simplebox" and 'hvac_config' not in st.session_state:
+        st.warning("⚠️ Bitte konfigurieren Sie zuerst das **HVAC-System**.")
+        st.stop()
+elif has_geometry and 'hvac_config' not in st.session_state:
+    # Legacy SimpleBox
     st.warning("⚠️ Bitte konfigurieren Sie zuerst das **HVAC-System**.")
     st.stop()
 
@@ -42,27 +58,50 @@ st.subheader("📋 Konfigurationsübersicht")
 
 col1, col2, col3 = st.columns(3)
 
-geometry = st.session_state['geometry']
-hvac_config = st.session_state['hvac_config']
-
 with col1:
-    st.markdown("**Geometrie**")
-    st.write(f"- Länge: {geometry.length:.1f} m")
-    st.write(f"- Breite: {geometry.width:.1f} m")
-    st.write(f"- Höhe: {geometry.height:.1f} m")
-    st.write(f"- Stockwerke: {geometry.num_floors}")
-    st.write(f"- Fläche: {geometry.total_floor_area:.1f} m²")
+    st.markdown("**Gebäudemodell**")
+    if building_model:
+        geom = building_model.geometry_summary
+        if building_model.source == "energieausweis":
+            st.write(f"- Quelle: 5-Zone-Modell")
+            st.write(f"- Typ: {building_model.gebaeudetyp}")
+            st.write(f"- Zonen: {building_model.num_zones}")
+            st.write(f"- Fläche: {geom.get('total_floor_area', 0):.1f} m²")
+            st.write(f"- Geschosse: {geom.get('num_floors', 0)}")
+        else:
+            st.write(f"- Quelle: SimpleBox")
+            st.write(f"- Länge: {geom['length']:.1f} m")
+            st.write(f"- Breite: {geom['width']:.1f} m")
+            st.write(f"- Höhe: {geom['height']:.1f} m")
+            st.write(f"- Fläche: {geom.get('total_floor_area', 0):.1f} m²")
+    elif has_geometry:
+        geometry = st.session_state['geometry']
+        st.write(f"- Quelle: SimpleBox (Legacy)")
+        st.write(f"- Länge: {geometry.length:.1f} m")
+        st.write(f"- Breite: {geometry.width:.1f} m")
+        st.write(f"- Höhe: {geometry.height:.1f} m")
+        st.write(f"- Fläche: {geometry.total_floor_area:.1f} m²")
 
 with col2:
     st.markdown("**HVAC-System**")
-    st.write(f"- Typ: {hvac_config['type']}")
-    st.write(f"- Heizen: {hvac_config['heating_setpoint']:.1f}°C")
-    st.write(f"- Kühlen: {hvac_config['cooling_setpoint']:.1f}°C")
-    st.write(f"- Lüftung: {hvac_config['air_change_rate']:.1f}/h")
+    if building_model and building_model.source == "energieausweis":
+        st.write(f"- Typ: Ideal Loads")
+        st.write(f"- Status: ✅ Konfiguriert")
+        st.write(f"- Zonen: {building_model.num_zones}")
+    else:
+        hvac_config = st.session_state.get('hvac_config', {})
+        st.write(f"- Typ: {hvac_config.get('type', 'N/A')}")
+        st.write(f"- Heizen: {hvac_config.get('heating_setpoint', 20):.1f}°C")
+        st.write(f"- Kühlen: {hvac_config.get('cooling_setpoint', 26):.1f}°C")
+        st.write(f"- Lüftung: {hvac_config.get('air_change_rate', 0):.1f}/h")
 
 with col3:
     st.markdown("**Simulation**")
-    st.write(f"- Gebäudemodell: Einfache Box")
+    if building_model:
+        model_name = "5-Zone-Modell" if building_model.source == "energieausweis" else "SimpleBox"
+        st.write(f"- Modell: {model_name}")
+    else:
+        st.write(f"- Modell: SimpleBox")
     st.write(f"- Wetterdaten: example.epw")
     st.write(f"- Zeitraum: 1 Jahr (8760 h)")
 
@@ -110,24 +149,61 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
         status_text = st.empty()
 
         try:
-            # Schritt 1: IDF erstellen
-            status_text.info("🏗️ Erstelle IDF-Modell...")
-            progress_bar.progress(10)
-
-            generator = SimpleBoxGenerator()
-            idf_path = output_dir / "building.idf"
             output_dir.mkdir(parents=True, exist_ok=True)
+            idf_path = output_dir / "building.idf"
 
-            idf = generator.create_model(geometry, idf_path)
+            # Unterschiedliche IDF-Behandlung je nach Quelle
+            if building_model and building_model.source == "energieausweis":
+                # 5-Zone-Modell: IDF aus Datei laden (bereits mit HVAC)
+                status_text.info("🏗️ Lade 5-Zone-IDF...")
+                progress_bar.progress(10)
 
-            progress_bar.progress(30)
-            status_text.info("❄️ Füge HVAC-System hinzu...")
+                source_idf_path = building_model.idf_path
+                if not source_idf_path.exists():
+                    st.error(f"❌ IDF-Datei nicht gefunden: {source_idf_path}")
+                    st.stop()
 
-            # Schritt 2: HVAC hinzufügen
-            idf = create_building_with_hvac(idf)
-            idf.save(str(idf_path))
+                # IDF aus Session State oder neu laden
+                if 'idf' in st.session_state:
+                    idf = st.session_state['idf']
+                else:
+                    from core.config import get_config
+                    config = get_config()
+                    from features.geometrie.generators.five_zone_generator import FiveZoneGenerator
+                    generator = FiveZoneGenerator(config)
+                    idd_file = generator._get_idd_file()
+                    IDF.setiddname(idd_file)
+                    idf = IDF(str(source_idf_path))
 
-            progress_bar.progress(40)
+                # Kopiere IDF in Output-Verzeichnis
+                idf.save(str(idf_path))
+
+                progress_bar.progress(40)
+                status_text.info(f"✅ 5-Zone-IDF geladen ({building_model.num_zones} Zonen)")
+
+            else:
+                # SimpleBox: IDF on-the-fly erstellen
+                status_text.info("🏗️ Erstelle SimpleBox-IDF...")
+                progress_bar.progress(10)
+
+                geometry = st.session_state.get('geometry')
+                if not geometry:
+                    st.error("❌ Keine Geometrie gefunden")
+                    st.stop()
+
+                generator = SimpleBoxGenerator()
+                idf = generator.create_model(geometry, idf_path)
+
+                progress_bar.progress(30)
+                status_text.info("❄️ Füge HVAC-System hinzu...")
+
+                # HVAC hinzufügen
+                idf = create_building_with_hvac(idf)
+                idf.save(str(idf_path))
+
+                progress_bar.progress(40)
+
+            # Ab hier gemeinsam für beide Workflows
             status_text.info("▶️ Starte EnergyPlus-Simulation...")
 
             # Schritt 3: Simulation ausführen
