@@ -157,7 +157,7 @@ class Config(BaseModel):
     @classmethod
     def load_default(cls) -> "Config":
         """Load default configuration."""
-        config_path = Path(__file__).parent.parent.parent / "config" / "default_config.yaml"
+        config_path = Path(__file__).parent.parent / "config" / "default_config.yaml"
         if config_path.exists():
             return cls.from_yaml(config_path)
         return cls()

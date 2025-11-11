@@ -4,10 +4,10 @@
 energyplus:
   # Path to EnergyPlus installation directory
   # Leave empty for auto-detection or set explicitly
-  installation_path: "/home/luma/EnergyPlus-23.2.0-7636e6b3e9-Linux-Ubuntu22.04-x86_64"
+  installation_path: "C:/EnergyPlusV25-1-0"
 
   # EnergyPlus version (optional, for validation)
-  version: "23.2"
+  version: "25.1"
 
   # Path to EnergyPlus executable
   # If empty, will be auto-detected from installation_path

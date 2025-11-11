@@ -12,83 +12,107 @@ python --version  # Sollte >= 3.10 sein
 
 ### 2. EnergyPlus Installation
 
-```bash
-# Windows
-dir "C:\EnergyPlusV23-2-0\energyplus.exe"
+EnergyPlus herunterladen: https://github.com/NREL/EnergyPlus/releases
 
+**Getestete Versionen:** 23.2, 25.1
+
+```powershell
+# Windows - Prüfen ob installiert
+Test-Path "C:\EnergyPlusV25-1-0\energyplus.exe"
+# oder
+Test-Path "C:\EnergyPlusV23-2-0\energyplus.exe"
+```
+
+```bash
 # Linux/Mac
 ls /usr/local/EnergyPlus-23-2-0/energyplus
 ```
 
 ### 3. Abhängigkeiten installieren
 
-```bash
-pip install -r requirements.txt
+**Windows:**
+```powershell
+# Virtual Environment erstellen
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# Core-Pakete installieren
+pip install eppy pandas pydantic numpy pyyaml tqdm plotly
 ```
 
-## 🎯 Methode 1: Web-Interface (Empfohlen für Einsteiger)
-
-### Schritt 1: Web-App starten
-
+**Linux/macOS:**
 ```bash
-python scripts/ui_starten.py
+python3 -m venv venv
+source venv/bin/activate
+pip install eppy pandas pydantic numpy pyyaml tqdm plotly
 ```
 
-Die App öffnet sich automatisch im Browser unter `http://localhost:8501`
+**Optional - Web-UI (benötigt C++ Compiler):**
+```bash
+pip install streamlit  # Installiert auch pyarrow
+```
 
-### Schritt 2: Parameter einstellen
+## 🎯 Methode 1: Python-Script (Empfohlen - Funktioniert sofort!)
 
-Im Browser:
-1. Navigiere zu "Geometrie"
-2. Stelle die Parameter ein:
-   - Länge: 20m
-   - Breite: 12m
-   - Höhe: 6m
-   - Stockwerke: 2
-   - Fensterflächenanteil: 0.3 (30%)
+### Schritt 0: Windows-Schnellstart
 
-### Schritt 3: HVAC-System wählen
+```powershell
+# Optional: Nutze das fertige Setup-Script
+.\SCHNELLSTART_WINDOWS.bat
+```
 
-1. Navigiere zu "HVAC"
-2. Wähle "Ideal Loads" (empfohlen für erste Versuche)
-
-### Schritt 4: Simulation starten
-
-1. Navigiere zu "Simulation"
-2. Klicke auf "Simulation starten"
-3. Warte ~10 Sekunden
-
-### Schritt 5: Ergebnisse ansehen
-
-1. Navigiere zu "Ergebnisse"
-2. Erkunde die interaktiven Diagramme:
-   - Energiebilanz
-   - Monatliche Übersicht
-   - Temperaturverlauf
-   - KPIs und Effizienzklasse
-
-## 💻 Methode 2: Python-Script
+## 💻 Methode 1a: Python-Script manuell
 
 ### Schritt 1: Beispiel-Script ausführen
 
+```powershell
+# Windows (im aktivierten venv)
+python beispiele\einfache_simulation.py
+```
+
 ```bash
+# Linux/macOS
 python beispiele/einfache_simulation.py
 ```
 
 Das Script:
-- Erstellt ein Gebäude (20m x 12m, 2 Stockwerke)
-- Fügt HVAC-System hinzu
-- Führt Simulation aus
-- Berechnet Kennzahlen
-- Erstellt Dashboard
+- Erstellt ein Gebäude (20m × 12m, 2 Stockwerke)
+- Fügt HVAC-System hinzu (Ideal Loads)
+- Führt EnergyPlus-Simulation aus (~3-7 Sekunden)
+- Berechnet Kennzahlen und Effizienzklasse
+- Erstellt interaktives Dashboard
 
-### Schritt 2: Ergebnisse öffnen
+**Erwartete Ausgabe:**
+```
+🏢 Einfache Gebäudesimulation
+1️⃣ Erstelle Gebäudegeometrie...
+   ✅ Gebäude: 20.0m x 12.0m x 6.0m
+2️⃣ Generiere IDF-Modell...
+   ✅ IDF erstellt
+3️⃣ Füge HVAC-System hinzu...
+   ✅ HVAC-System hinzugefügt
+4️⃣ Führe Simulation aus...
+   ✅ Simulation erfolgreich! (2.6s)
+5️⃣ Werte Ergebnisse aus...
+   Energiekennzahl: 72.4 kWh/m²a
+   Effizienzklasse: B
+6️⃣ Erstelle Visualisierungen...
+   ✅ Dashboard: output/einfache_simulation/dashboard.html
+```
+
+### Schritt 2: Dashboard öffnen
+
+```powershell
+# Windows - Dashboard im Browser öffnen
+start output\einfache_simulation\dashboard.html
+```
 
 ```bash
-# Dashboard im Browser öffnen
-firefox output/einfache_simulation/dashboard.html
-# oder
-open output/einfache_simulation/dashboard.html  # macOS
+# Linux
+xdg-open output/einfache_simulation/dashboard.html
+
+# macOS
+open output/einfache_simulation/dashboard.html
 ```
 
 ### Schritt 3: Eigene Simulationen
@@ -138,16 +162,47 @@ if result.success:
     print(f"Energiekennzahl: {kpis.energiekennzahl_kwh_m2a:.1f} kWh/m²a")
 ```
 
+## 🌐 Methode 2: Web-Interface (In Entwicklung)
+
+**Status:** Die Web-UI ist derzeit in Entwicklung. Nur die Startseite ist verfügbar.
+
+### Voraussetzungen
+
+```powershell
+# Windows - Visual Studio Build Tools erforderlich für pyarrow
+pip install streamlit
+```
+
+### Starten
+
+```bash
+python scripts/ui_starten.py
+# Öffnet http://localhost:8501
+```
+
+**Geplante Features:**
+- Geometrie-Editor mit 3D-Vorschau
+- HVAC-System-Konfigurator
+- Simulation mit Fortschrittsanzeige
+- Interaktive Ergebnis-Dashboards
+
 ## 🐛 Problemlösung
 
 ### EnergyPlus nicht gefunden
 
+**Option 1: Config-Datei anpassen**
+```yaml
+# config/default_config.yaml
+energyplus:
+  installation_path: "C:/EnergyPlusV25-1-0"  # Dein Pfad
+```
+
+**Option 2: Python-Code**
 ```python
-# Konfiguration manuell setzen
 from core.config import get_config, set_config
 
 config = get_config()
-config.energyplus.installation_path = "C:/EnergyPlusV23-2-0"  # Dein Pfad
+config.energyplus.installation_path = "C:/EnergyPlusV25-1-0"
 set_config(config)
 ```
 

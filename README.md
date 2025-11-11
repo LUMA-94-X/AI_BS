@@ -17,31 +17,72 @@ Ein Python-Framework für einfache und automatisierte Gebäudeenergiesimulatione
 ### Voraussetzungen
 
 - Python 3.10 oder neuer
-- EnergyPlus 23.2 ([Download](https://energyplus.net))
+- EnergyPlus 23.2 oder neuer (getestet mit 25.1) - [Download](https://github.com/NREL/EnergyPlus/releases)
 
-### Setup
+### Windows Setup (Empfohlen)
 
-```bash
-# Abhängigkeiten installieren
-pip install -r requirements.txt
+**Schnellstart:**
+```powershell
+# Doppelklick auf:
+SCHNELLSTART_WINDOWS.bat
+```
 
-# Konfiguration prüfen
+**Manuelles Setup:**
+```powershell
+# 1. Virtual Environment erstellen und aktivieren
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# 2. Abhängigkeiten installieren (ohne Streamlit UI)
+pip install eppy pandas pydantic numpy pyyaml tqdm plotly
+
+# 3. EnergyPlus-Pfad prüfen
 python -c "from core.config import get_config; print(get_config().energyplus.get_executable_path())"
 ```
 
-## 🚀 Schnellstart
-
-### Web-Interface starten
+### Linux/macOS Setup
 
 ```bash
+# 1. Virtual Environment erstellen
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. Abhängigkeiten installieren
+pip install eppy pandas pydantic numpy pyyaml tqdm plotly
+
+# 3. Konfiguration prüfen
+python -c "from core.config import get_config; print(get_config().energyplus.get_executable_path())"
+```
+
+**Hinweis:** Die Web-UI (Streamlit) benötigt zusätzlich Visual Studio Build Tools (Windows) oder einen C++ Compiler, da sie pyarrow voraussetzt.
+
+## 🚀 Schnellstart
+
+### Simulation per Python (Empfohlen)
+
+```bash
+# Windows
+python beispiele\einfache_simulation.py
+
+# Linux/macOS
+python beispiele/einfache_simulation.py
+```
+
+Das Beispiel erstellt automatisch:
+- Ein Gebäudemodell (20m × 12m, 2 Stockwerke)
+- HVAC-System (Ideal Loads)
+- Simulation und Auswertung
+- Interaktives Dashboard (`output/einfache_simulation/dashboard.html`)
+
+### Web-Interface (In Entwicklung)
+
+```bash
+# Erfordert Streamlit + pyarrow (C++ Compiler nötig)
+pip install streamlit
 python scripts/ui_starten.py
 ```
 
-### Simulation per Python
-
-```bash
-python beispiele/einfache_simulation.py
-```
+**Status:** Nur Startseite verfügbar, weitere Seiten in Entwicklung.
 
 ## 📁 Projekt-Struktur
 

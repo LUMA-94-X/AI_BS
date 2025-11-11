@@ -90,7 +90,7 @@ class EnergyPlusSQLParser:
             Sum of all values for the year
         """
         query = """
-        SELECT SUM(rd.VariableValue)
+        SELECT SUM(rd.Value)
         FROM ReportData rd
         JOIN ReportDataDictionary rdd ON rd.ReportDataDictionaryIndex = rdd.ReportDataDictionaryIndex
         WHERE rdd.Name = ?
@@ -110,7 +110,7 @@ class EnergyPlusSQLParser:
             Maximum value
         """
         query = """
-        SELECT MAX(rd.VariableValue)
+        SELECT MAX(rd.Value)
         FROM ReportData rd
         JOIN ReportDataDictionary rdd ON rd.ReportDataDictionaryIndex = rdd.ReportDataDictionaryIndex
         WHERE rdd.Name = ?
@@ -127,7 +127,7 @@ class EnergyPlusSQLParser:
             Dictionary with mean, min, max temperature
         """
         query = """
-        SELECT AVG(rd.VariableValue), MIN(rd.VariableValue), MAX(rd.VariableValue)
+        SELECT AVG(rd.Value), MIN(rd.Value), MAX(rd.Value)
         FROM ReportData rd
         JOIN ReportDataDictionary rdd ON rd.ReportDataDictionaryIndex = rdd.ReportDataDictionaryIndex
         WHERE rdd.Name = 'Zone Mean Air Temperature'
@@ -154,7 +154,7 @@ class EnergyPlusSQLParser:
             DataFrame with timestamps and values
         """
         query = """
-        SELECT t.Month, t.Day, t.Hour, t.Minute, rd.VariableValue
+        SELECT t.Month, t.Day, t.Hour, t.Minute, rd.Value
         FROM ReportData rd
         JOIN ReportDataDictionary rdd ON rd.ReportDataDictionaryIndex = rdd.ReportDataDictionaryIndex
         JOIN Time t ON rd.TimeIndex = t.TimeIndex
@@ -165,13 +165,14 @@ class EnergyPlusSQLParser:
         df = pd.read_sql_query(query, self.conn, params=(variable_name,))
 
         if not df.empty:
-            # Create datetime column
+            # Create datetime column (add year for proper datetime)
+            df['Year'] = 2023  # Use a standard year for simulation data
             df['datetime'] = pd.to_datetime(
-                df[['Month', 'Day', 'Hour', 'Minute']].rename(
-                    columns={'Month': 'month', 'Day': 'day', 'Hour': 'hour', 'Minute': 'minute'}
+                df[['Year', 'Month', 'Day', 'Hour', 'Minute']].rename(
+                    columns={'Year': 'year', 'Month': 'month', 'Day': 'day', 'Hour': 'hour', 'Minute': 'minute'}
                 )
             )
-            df = df[['datetime', 'VariableValue']].rename(columns={'VariableValue': variable_name})
+            df = df[['datetime', 'Value']].rename(columns={'Value': variable_name})
 
         return df
 
@@ -184,10 +185,10 @@ class EnergyPlusSQLParser:
         query = """
         SELECT
             t.Month,
-            SUM(CASE WHEN rdd.Name = 'Zone Air System Sensible Heating Energy' THEN rd.VariableValue ELSE 0 END) / 3600000.0 AS Heizung_kWh,
-            SUM(CASE WHEN rdd.Name = 'Zone Air System Sensible Cooling Energy' THEN rd.VariableValue ELSE 0 END) / 3600000.0 AS Kuehlung_kWh,
-            SUM(CASE WHEN rdd.Name = 'Zone Lights Electric Energy' THEN rd.VariableValue ELSE 0 END) / 3600000.0 AS Beleuchtung_kWh,
-            SUM(CASE WHEN rdd.Name = 'Zone Electric Equipment Electric Energy' THEN rd.VariableValue ELSE 0 END) / 3600000.0 AS Geraete_kWh
+            SUM(CASE WHEN rdd.Name = 'Zone Air System Sensible Heating Energy' THEN rd.Value ELSE 0 END) / 3600000.0 AS Heizung_kWh,
+            SUM(CASE WHEN rdd.Name = 'Zone Air System Sensible Cooling Energy' THEN rd.Value ELSE 0 END) / 3600000.0 AS Kuehlung_kWh,
+            SUM(CASE WHEN rdd.Name = 'Zone Lights Electric Energy' THEN rd.Value ELSE 0 END) / 3600000.0 AS Beleuchtung_kWh,
+            SUM(CASE WHEN rdd.Name = 'Zone Electric Equipment Electric Energy' THEN rd.Value ELSE 0 END) / 3600000.0 AS Geraete_kWh
         FROM ReportData rd
         JOIN ReportDataDictionary rdd ON rd.ReportDataDictionaryIndex = rdd.ReportDataDictionaryIndex
         JOIN Time t ON rd.TimeIndex = t.TimeIndex

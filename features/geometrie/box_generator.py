@@ -708,34 +708,26 @@ class SimpleBoxGenerator:
             )
 
             # Lights
-            idf.newidfobject(
-                "LIGHTS",
-                Name=f"{zone_name}_Lights",
-                Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
-                Schedule_Name="OccupancySchedule",
-                Design_Level_Calculation_Method="Watts/Area",
-                Lighting_Level="",
-                Watts_per_Zone_Floor_Area=10.0,  # 10 W/m²
-                Watts_per_Person="",
-                Return_Air_Fraction=0.0,
-                Fraction_Radiant=0.7,
-                Fraction_Visible=0.2,
-            )
+            lights = idf.newidfobject("LIGHTS")
+            lights.Name = f"{zone_name}_Lights"
+            lights.Zone_or_ZoneList_or_Space_or_SpaceList_Name = zone_name
+            lights.Schedule_Name = "OccupancySchedule"
+            lights.Design_Level_Calculation_Method = "Watts/Area"
+            lights.Watts_per_Floor_Area = 10.0  # 10 W/m²
+            lights.Return_Air_Fraction = 0.0
+            lights.Fraction_Radiant = 0.7
+            lights.Fraction_Visible = 0.2
 
             # Electric Equipment
-            idf.newidfobject(
-                "ELECTRICEQUIPMENT",
-                Name=f"{zone_name}_Equipment",
-                Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
-                Schedule_Name="OccupancySchedule",
-                Design_Level_Calculation_Method="Watts/Area",
-                Design_Level="",
-                Watts_per_Zone_Floor_Area=15.0,  # 15 W/m²
-                Watts_per_Person="",
-                Fraction_Latent=0.0,
-                Fraction_Radiant=0.3,
-                Fraction_Lost=0.0,
-            )
+            equipment = idf.newidfobject("ELECTRICEQUIPMENT")
+            equipment.Name = f"{zone_name}_Equipment"
+            equipment.Zone_or_ZoneList_or_Space_or_SpaceList_Name = zone_name
+            equipment.Schedule_Name = "OccupancySchedule"
+            equipment.Design_Level_Calculation_Method = "Watts/Area"
+            equipment.Watts_per_Floor_Area = 15.0  # 15 W/m²
+            equipment.Fraction_Latent = 0.0
+            equipment.Fraction_Radiant = 0.3
+            equipment.Fraction_Lost = 0.0
 
     def _add_ideal_loads(self, idf: IDF, geometry: BuildingGeometry) -> None:
         """Add ideal loads air system for HVAC (direct objects, not templates).
