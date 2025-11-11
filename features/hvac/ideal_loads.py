@@ -153,6 +153,32 @@ class HVACTemplateManager:
                 Hourly_Value=1.0,
             )
 
+        # Add heating and cooling setpoint schedules if not present
+        heating_exists = any(
+            sch.Name == "HeatingSetpoint"
+            for sch in idf.idfobjects.get('SCHEDULE:CONSTANT', [])
+        )
+        cooling_exists = any(
+            sch.Name == "CoolingSetpoint"
+            for sch in idf.idfobjects.get('SCHEDULE:CONSTANT', [])
+        )
+
+        if not heating_exists:
+            idf.newidfobject(
+                "SCHEDULE:CONSTANT",
+                Name="HeatingSetpoint",
+                Schedule_Type_Limits_Name="",
+                Hourly_Value=20.0,  # 20°C heating setpoint
+            )
+
+        if not cooling_exists:
+            idf.newidfobject(
+                "SCHEDULE:CONSTANT",
+                Name="CoolingSetpoint",
+                Schedule_Type_Limits_Name="",
+                Hourly_Value=26.0,  # 26°C cooling setpoint
+            )
+
     def _add_ideal_loads_to_zone(self, idf: IDF, zone_name: str) -> None:
         """Add ideal loads air system to a specific zone.
 
@@ -222,6 +248,26 @@ class HVACTemplateManager:
             Zone_Air_Exhaust_Node_or_NodeList_Name="",
             Zone_Air_Node_Name=f"{zone_name}_Air_Node",
             Zone_Return_Air_Node_or_NodeList_Name=f"{zone_name}_Return_Node",
+        )
+
+        # CRITICAL: Add ZoneControl:Thermostat
+        # IdealLoads HVAC requires thermostats to control heating/cooling
+        # Without this, EnergyPlus will crash during initialization!
+        idf.newidfobject(
+            "ZONECONTROL:THERMOSTAT",
+            Name=f"{zone_name}_Thermostat",
+            Zone_or_ZoneList_Name=zone_name,
+            Control_Type_Schedule_Name="AlwaysOn",
+            Control_1_Object_Type="ThermostatSetpoint:DualSetpoint",
+            Control_1_Name=f"{zone_name}_DualSetpoint",
+        )
+
+        # Add ThermostatSetpoint:DualSetpoint
+        idf.newidfobject(
+            "THERMOSTATSETPOINT:DUALSETPOINT",
+            Name=f"{zone_name}_DualSetpoint",
+            Heating_Setpoint_Temperature_Schedule_Name="HeatingSetpoint",
+            Cooling_Setpoint_Temperature_Schedule_Name="CoolingSetpoint",
         )
 
         print(f"   ✅ Added ideal loads HVAC to zone '{zone_name}'")
