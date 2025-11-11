@@ -4,7 +4,8 @@
 energyplus:
   # Path to EnergyPlus installation directory
   # Leave empty for auto-detection or set explicitly
-  installation_path: "C:/EnergyPlusV25-1-0"
+  # For WSL: Use /mnt/c/... format for exists() checks to work
+  installation_path: "/mnt/c/EnergyPlusV25-1-0"
 
   # EnergyPlus version (optional, for validation)
   version: "25.1"

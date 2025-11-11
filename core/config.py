@@ -27,8 +27,21 @@ class EnergyPlusConfig(BaseModel):
             base_path = self._auto_detect_installation()
 
         # Determine executable name based on OS
+        # Special handling for WSL: if installation_path points to Windows (C:/ or /mnt/c/),
+        # we need to use .exe extension even though platform.system() returns "Linux"
         system = platform.system()
-        if system == "Windows":
+        is_wsl = False
+
+        if system == "Linux":
+            # Check if running in WSL
+            try:
+                with open('/proc/version', 'r') as f:
+                    is_wsl = 'microsoft' in f.read().lower()
+            except:
+                pass
+
+        # Use .exe if Windows or WSL (where we use Windows EnergyPlus)
+        if system == "Windows" or is_wsl:
             exe_name = "energyplus.exe"
         else:
             exe_name = "energyplus"

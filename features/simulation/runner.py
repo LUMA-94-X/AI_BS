@@ -110,21 +110,18 @@ class EnergyPlusRunner:
                 logger.warning(f"Could not copy IDD file: {e}")
 
         try:
-            # Convert WSL path to Windows path for ExpandObjects.exe
-            output_dir_for_expand = self._convert_wsl_to_windows_path(output_dir)
-
             # Run ExpandObjects (it reads in.idf and creates expanded.idf)
             # Use absolute path and shell=True for Windows compatibility
             import platform
             use_shell = platform.system() == "Windows"
 
             logger.info(f"Running: {self.expand_objects_exe}")
-            logger.info(f"Working directory (WSL): {output_dir}")
-            logger.info(f"Working directory (Win): {output_dir_for_expand}")
+            logger.info(f"Working directory: {output_dir}")
 
+            # IMPORTANT: cwd must be WSL path for Python subprocess in WSL
             result = subprocess.run(
                 [str(self.expand_objects_exe.resolve())],
-                cwd=str(output_dir_for_expand),
+                cwd=str(output_dir),
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -293,13 +290,15 @@ class EnergyPlusRunner:
         start_time = datetime.now()
         try:
             # Run EnergyPlus
+            # IMPORTANT: cwd must be WSL path for Python in WSL,
+            # but command arguments must be Windows paths for energyplus.exe
             logger.info("Starting EnergyPlus subprocess...")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=self.config.simulation.timeout,
-                cwd=str(output_dir_for_eplus),
+                cwd=str(output_dir.absolute()),  # Keep WSL path for cwd!
             )
             logger.info("EnergyPlus subprocess completed.")
 
