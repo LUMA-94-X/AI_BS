@@ -128,7 +128,7 @@ class KennzahlenRechner:
             Effizienzklasse (A+ bis H)
         """
         for klasse, grenzwert in self.EFFIZIENZ_GRENZEN.items():
-            if energiekennzahl < grenzwert:
+            if energiekennzahl <= grenzwert:
                 return klasse
         return 'H'
 

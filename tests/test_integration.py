@@ -40,19 +40,20 @@ def test_output_dir():
 def test_complete_workflow(test_geometrie, test_output_dir):
     """Teste den kompletten Workflow von Geometrie bis Auswertung."""
 
-    # 1. Gebäudemodell erstellen
-    generator = SimpleBoxGenerator()
-    idf_path = test_output_dir / "test_building.idf"
-    idf = generator.create_model(test_geometrie, idf_path)
-
-    assert idf_path.exists(), "IDF-Datei wurde nicht erstellt"
-
-    # 2. HVAC hinzufügen
-    idf = create_building_with_hvac(idf, "ideal_loads")
-    idf.save(str(idf_path))
-
-    # 3. Simulation ausführen (nur wenn EnergyPlus verfügbar)
+    # Nur wenn EnergyPlus verfügbar ist
     try:
+        # 1. Gebäudemodell erstellen
+        generator = SimpleBoxGenerator()
+        idf_path = test_output_dir / "test_building.idf"
+        idf = generator.create_model(test_geometrie, idf_path)
+
+        assert idf_path.exists(), "IDF-Datei wurde nicht erstellt"
+
+        # 2. HVAC hinzufügen
+        idf = create_building_with_hvac(idf, "ideal_loads")
+        idf.save(str(idf_path))
+
+        # 3. Simulation ausführen
         runner = EnergyPlusRunner()
 
         # Prüfe ob Wetterdatei existiert
@@ -90,9 +91,9 @@ def test_complete_workflow(test_geometrie, test_output_dir):
         fig = viz.erstelle_energiebilanz_chart(kennzahlen)
         assert fig is not None, "Chart sollte erstellt werden"
 
-        print(f"\n✅ Integration-Test erfolgreich!")
+        print(f"\n[OK] Integration-Test erfolgreich!")
         print(f"   Effizienzklasse: {kennzahlen.effizienzklasse}")
-        print(f"   Energiekennzahl: {kennzahlen.energiekennzahl_kwh_m2a:.1f} kWh/m²a")
+        print(f"   Energiekennzahl: {kennzahlen.energiekennzahl_kwh_m2a:.1f} kWh/m2a")
 
     except FileNotFoundError as e:
         pytest.skip(f"EnergyPlus nicht verfügbar: {e}")
