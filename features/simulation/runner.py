@@ -51,7 +51,78 @@ class EnergyPlusRunner:
                 "Please install EnergyPlus or set the correct path in config."
             )
 
+        # ExpandObjects executable (in same directory as EnergyPlus)
+        self.expand_objects_exe = self.energyplus_exe.parent / "ExpandObjects.exe"
+        if not self.expand_objects_exe.exists():
+            # Try without .exe extension (Linux/Mac)
+            self.expand_objects_exe = self.energyplus_exe.parent / "ExpandObjects"
+
         logger.info(f"EnergyPlus executable found: {self.energyplus_exe}")
+        if self.expand_objects_exe.exists():
+            logger.info(f"ExpandObjects found: {self.expand_objects_exe}")
+
+    def _needs_expand_objects(self, idf_path: Path) -> bool:
+        """Check if IDF file contains HVACTemplate objects that need expansion."""
+        try:
+            with open(idf_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            return 'HVACTemplate:' in content
+        except Exception as e:
+            logger.warning(f"Could not check IDF for HVACTemplate objects: {e}")
+            return False
+
+    def _run_expand_objects(self, idf_path: Path, output_dir: Path) -> Optional[Path]:
+        """Run ExpandObjects preprocessor on IDF file.
+
+        Args:
+            idf_path: Path to original IDF file
+            output_dir: Output directory for expanded IDF
+
+        Returns:
+            Path to expanded IDF file, or None if expansion failed
+        """
+        if not self.expand_objects_exe.exists():
+            logger.error("ExpandObjects not found - cannot expand HVACTemplate objects")
+            return None
+
+        logger.info("Running ExpandObjects to expand HVACTemplate objects...")
+
+        # Copy IDF to output directory (ExpandObjects expects in.idf)
+        in_idf = output_dir / "in.idf"
+        shutil.copy(idf_path, in_idf)
+
+        # Also need Energy+.idd in same directory
+        idd_file = self.energyplus_exe.parent / "Energy+.idd"
+        if idd_file.exists():
+            shutil.copy(idd_file, output_dir / "Energy+.idd")
+
+        try:
+            # Run ExpandObjects (it reads in.idf and creates expanded.idf)
+            result = subprocess.run(
+                [str(self.expand_objects_exe)],
+                cwd=str(output_dir),
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+
+            # Check for expanded.idf
+            expanded_idf = output_dir / "expanded.idf"
+            if expanded_idf.exists():
+                logger.info("ExpandObjects completed successfully")
+                return expanded_idf
+            else:
+                logger.error("ExpandObjects did not create expanded.idf")
+                logger.error(f"ExpandObjects output: {result.stdout}")
+                logger.error(f"ExpandObjects errors: {result.stderr}")
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.error("ExpandObjects timed out")
+            return None
+        except Exception as e:
+            logger.error(f"ExpandObjects error: {e}")
+            return None
 
     def run_simulation(
         self,
@@ -103,6 +174,24 @@ class EnergyPlusRunner:
         logger.info(f"Running simulation: {idf_path.name}")
         logger.info(f"Weather file: {weather_file.name}")
         logger.info(f"Output directory: {output_dir}")
+
+        # Check if ExpandObjects is needed (HVACTemplate objects present)
+        if self._needs_expand_objects(idf_path):
+            logger.info("IDF contains HVACTemplate objects - running ExpandObjects")
+            expanded_idf = self._run_expand_objects(idf_path, output_dir)
+
+            if expanded_idf is None:
+                return SimulationResult(
+                    success=False,
+                    idf_path=idf_path,
+                    output_dir=output_dir,
+                    execution_time=0,
+                    error_message="ExpandObjects failed - could not expand HVACTemplate objects",
+                )
+
+            # Use expanded IDF for simulation
+            idf_path = expanded_idf
+            logger.info(f"Using expanded IDF: {idf_path.name}")
 
         # Prepare EnergyPlus command
         cmd = [
