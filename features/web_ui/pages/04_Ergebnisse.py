@@ -152,14 +152,25 @@ try:
     monthly_df = parser.get_monthly_summary()
 
     if not monthly_df.empty:
-        # Formatiere Zahlen
-        monthly_df_formatted = monthly_df.copy()
-        for col in ['Heizung_kWh', 'Kuehlung_kWh', 'Beleuchtung_kWh', 'Geraete_kWh', 'Gesamt_kWh']:
-            if col in monthly_df_formatted.columns:
-                monthly_df_formatted[col] = monthly_df_formatted[col].apply(lambda x: f"{x:.1f}")
+        # Erstelle HTML-Tabelle (ohne pyarrow)
+        html = "<table style='width:100%; border-collapse: collapse;'>"
+        html += "<thead><tr style='background-color: #f0f2f6;'>"
+        for col in monthly_df.columns:
+            html += f"<th style='padding: 8px; border: 1px solid #ddd;'>{col}</th>"
+        html += "</tr></thead><tbody>"
 
-        # Zeige als Tabelle (ohne pyarrow)
-        st.table(monthly_df_formatted)
+        for idx, row in monthly_df.iterrows():
+            html += "<tr>"
+            for col in monthly_df.columns:
+                val = row[col]
+                if col != 'Monat' and isinstance(val, (int, float)):
+                    html += f"<td style='padding: 8px; border: 1px solid #ddd; text-align: right;'>{val:.1f}</td>"
+                else:
+                    html += f"<td style='padding: 8px; border: 1px solid #ddd;'>{val}</td>"
+            html += "</tr>"
+        html += "</tbody></table>"
+
+        st.markdown(html, unsafe_allow_html=True)
 
         # Balkendiagramm
         import plotly.express as px
