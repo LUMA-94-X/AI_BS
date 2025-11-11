@@ -447,7 +447,12 @@ class FiveZoneGenerator:
                 boundary_object = zone_geom.name.replace(f"_F{floor_num+1}", f"_F{floor_num}") + "_Ceiling"
                 construction = "CeilingConstruction"
 
-            # Create floor surface
+            # CRITICAL: Floor normal must point DOWN
+            # Ground floor: [3, 2, 1, 0] = reversed order so normal points down
+            # Inter-zone floor: ALSO [3, 2, 1, 0] initially, then we match to ceiling below
+            #
+            # For inter-zone: After ceiling is created with [0,1,2,3],
+            # floor above uses [3,2,1,0] which is the EXACT REVERSE
             idf.newidfobject(
                 "BUILDINGSURFACE:DETAILED",
                 Name=f"{zone_geom.name}_Floor",
@@ -460,18 +465,18 @@ class FiveZoneGenerator:
                 Wind_Exposure="NoWind",
                 View_Factor_to_Ground="autocalculate",
                 Number_of_Vertices=4,
-                # Counterclockwise from top-left (floor normal points down)
-                Vertex_1_Xcoordinate=vertices_2d[0][0],
-                Vertex_1_Ycoordinate=vertices_2d[0][1],
+                # Floor vertices: REVERSED [3,2,1,0] so normal points DOWN
+                Vertex_1_Xcoordinate=vertices_2d[3][0],
+                Vertex_1_Ycoordinate=vertices_2d[3][1],
                 Vertex_1_Zcoordinate=z_base,
-                Vertex_2_Xcoordinate=vertices_2d[1][0],
-                Vertex_2_Ycoordinate=vertices_2d[1][1],
+                Vertex_2_Xcoordinate=vertices_2d[2][0],
+                Vertex_2_Ycoordinate=vertices_2d[2][1],
                 Vertex_2_Zcoordinate=z_base,
-                Vertex_3_Xcoordinate=vertices_2d[2][0],
-                Vertex_3_Ycoordinate=vertices_2d[2][1],
+                Vertex_3_Xcoordinate=vertices_2d[1][0],
+                Vertex_3_Ycoordinate=vertices_2d[1][1],
                 Vertex_3_Zcoordinate=z_base,
-                Vertex_4_Xcoordinate=vertices_2d[3][0],
-                Vertex_4_Ycoordinate=vertices_2d[3][1],
+                Vertex_4_Xcoordinate=vertices_2d[0][0],
+                Vertex_4_Ycoordinate=vertices_2d[0][1],
                 Vertex_4_Zcoordinate=z_base,
             )
 
@@ -506,7 +511,8 @@ class FiveZoneGenerator:
                 sun_exposure = "NoSun"
                 wind_exposure = "NoWind"
 
-            # Ceiling vertices: clockwise (ceiling normal points up)
+            # CRITICAL: Ceiling/Roof normal must point UP (viewed from above = counterclockwise)
+            # Use vertices in order [0, 1, 2, 3] to get correct normal direction
             idf.newidfobject(
                 "BUILDINGSURFACE:DETAILED",
                 Name=f"{zone_geom.name}_Ceiling",
@@ -519,18 +525,18 @@ class FiveZoneGenerator:
                 Wind_Exposure=wind_exposure,
                 View_Factor_to_Ground="autocalculate",
                 Number_of_Vertices=4,
-                # Clockwise from bottom-left
+                # Counterclockwise from above (ceiling normal points UP)
                 Vertex_1_Xcoordinate=vertices_2d[0][0],
                 Vertex_1_Ycoordinate=vertices_2d[0][1],
                 Vertex_1_Zcoordinate=z_top,
-                Vertex_2_Xcoordinate=vertices_2d[3][0],
-                Vertex_2_Ycoordinate=vertices_2d[3][1],
+                Vertex_2_Xcoordinate=vertices_2d[1][0],
+                Vertex_2_Ycoordinate=vertices_2d[1][1],
                 Vertex_2_Zcoordinate=z_top,
                 Vertex_3_Xcoordinate=vertices_2d[2][0],
                 Vertex_3_Ycoordinate=vertices_2d[2][1],
                 Vertex_3_Zcoordinate=z_top,
-                Vertex_4_Xcoordinate=vertices_2d[1][0],
-                Vertex_4_Ycoordinate=vertices_2d[1][1],
+                Vertex_4_Xcoordinate=vertices_2d[3][0],
+                Vertex_4_Ycoordinate=vertices_2d[3][1],
                 Vertex_4_Zcoordinate=z_top,
             )
 
