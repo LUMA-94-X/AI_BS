@@ -37,31 +37,31 @@ jobs:
 
         # Test all core modules
         from features.geometrie.box_generator import BuildingGeometry, SimpleBoxGenerator
-        print('✅ geometrie.box_generator')
+        print('[OK] geometrie.box_generator')
 
         from features.hvac.ideal_loads import create_building_with_hvac
-        print('✅ hvac.ideal_loads')
+        print('[OK] hvac.ideal_loads')
 
         from features.simulation.runner import EnergyPlusRunner, SimulationResult
-        print('✅ simulation.runner')
+        print('[OK] simulation.runner')
 
         from features.auswertung.kpi_rechner import KennzahlenRechner, GebaeudeKennzahlen
-        print('✅ auswertung.kpi_rechner')
+        print('[OK] auswertung.kpi_rechner')
 
         from features.auswertung.sql_parser import EnergyPlusSQLParser
-        print('✅ auswertung.sql_parser')
+        print('[OK] auswertung.sql_parser')
 
         from features.auswertung.visualisierung import ErgebnisVisualisierer
-        print('✅ auswertung.visualisierung')
+        print('[OK] auswertung.visualisierung')
 
         from core.config import get_config, Config
-        print('✅ core.config')
+        print('[OK] core.config')
 
         from core.materialien import add_basic_materials
-        print('✅ core.materialien')
+        print('[OK] core.materialien')
 
         print()
-        print('All imports successful! ✨')
+        print('All imports successful!')
         "
 
     - name: Test config loading
@@ -73,12 +73,12 @@ jobs:
 
         print('Testing config loading...')
         config = get_config()
-        print(f'✅ Config loaded')
+        print('[OK] Config loaded')
         print(f'   EnergyPlus version: {config.energyplus.version}')
         print(f'   Output dir: {config.simulation.output_dir}')
         print(f'   Num processes: {config.simulation.num_processes}')
         print()
-        print('Config loading successful! ✨')
+        print('Config loading successful!')
         "
 
     - name: Test BuildingGeometry
@@ -95,13 +95,13 @@ jobs:
             height=6.0,
             num_floors=2
         )
-        print(f'✅ Geometry created: {geometry.length}m × {geometry.width}m × {geometry.height}m')
-        print(f'   Total floor area: {geometry.total_floor_area}m²')
+        print(f'[OK] Geometry created: {geometry.length}m x {geometry.width}m x {geometry.height}m')
+        print(f'   Total floor area: {geometry.total_floor_area}m2')
         print(f'   Floor height: {geometry.floor_height}m')
         print()
-        print('BuildingGeometry test successful! ✨')
+        print('BuildingGeometry test successful!')
         "
 
     - name: Run integration tests
       run: |
-        pytest tests/ -v --tb=short || echo "⚠️ Integration tests skipped (EnergyPlus not installed)"
+        pytest tests/ -v --tb=short || echo "[SKIP] Integration tests skipped (EnergyPlus not installed)"
