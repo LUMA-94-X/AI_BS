@@ -230,17 +230,28 @@ class EnergyPlusRunner:
             str(idf_path.absolute()),
         ]
 
+        logger.info("="*80)
+        logger.info("ENERGYPLUS COMMAND")
+        logger.info("="*80)
+        logger.info(f"Executable: {self.energyplus_exe}")
+        logger.info(f"Working dir: {output_dir}")
+        logger.info(f"IDF file: {idf_path}")
+        logger.info(f"Weather file: {weather_file}")
+        logger.info(f"Full command: {' '.join(cmd)}")
+        logger.info("="*80)
+
         start_time = datetime.now()
         try:
             # Run EnergyPlus
-            logger.info(f"Running EnergyPlus command: {' '.join(cmd)}")
+            logger.info("Starting EnergyPlus subprocess...")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=self.config.simulation.timeout,
-                cwd=output_dir,
+                cwd=str(output_dir.absolute()),
             )
+            logger.info("EnergyPlus subprocess completed.")
 
             execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -249,9 +260,14 @@ class EnergyPlusRunner:
             logger.info(f"EnergyPlus execution time: {execution_time:.2f}s")
 
             if result.stdout:
-                logger.debug(f"EnergyPlus stdout (first 2000 chars):\n{result.stdout[:2000]}")
+                logger.info(f"EnergyPlus stdout (first 2000 chars):\n{result.stdout[:2000]}")
+            else:
+                logger.warning("EnergyPlus stdout is EMPTY")
+
             if result.stderr:
                 logger.warning(f"EnergyPlus stderr:\n{result.stderr}")
+            else:
+                logger.info("EnergyPlus stderr is empty (normal)")
 
             # Check for errors
             err_file = output_dir / f"{output_prefix}out.err"
