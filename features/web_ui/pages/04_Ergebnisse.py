@@ -26,16 +26,35 @@ if 'simulation_result' not in st.session_state:
     st.stop()
 
 result = st.session_state['simulation_result']
-geometry = st.session_state['geometry']
 
 if not result.success:
     st.error("❌ Die Simulation war nicht erfolgreich. Bitte überprüfen Sie die Simulation.")
     st.stop()
 
+# Geometrie-Info holen (entweder von BuildingModel oder Legacy)
+from core.building_model import get_building_model_from_session
+
+building_model = get_building_model_from_session(st.session_state)
+if building_model:
+    # 5-Zone oder SimpleBox via BuildingModel
+    geom_summary = building_model.geometry_summary
+    total_floor_area = geom_summary.get('total_floor_area', 0)
+elif 'geometry' in st.session_state:
+    # Legacy SimpleBox
+    geometry = st.session_state['geometry']
+    total_floor_area = geometry.total_floor_area
+else:
+    st.error("❌ Keine Geometrie-Daten gefunden. Bitte definieren Sie zuerst ein Gebäudemodell.")
+    st.stop()
+
+if total_floor_area == 0:
+    st.error("❌ Ungültige Gebäudefläche (0 m²). Bitte überprüfen Sie das Gebäudemodell.")
+    st.stop()
+
 # Lade Ergebnisse
 try:
     # KPIs berechnen
-    rechner = KennzahlenRechner(geometry.total_floor_area)
+    rechner = KennzahlenRechner(total_floor_area)
     kennzahlen = rechner.berechne_kennzahlen(sql_file=result.sql_file)
 
     # KPIs anzeigen
