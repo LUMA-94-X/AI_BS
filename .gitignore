@@ -69,3 +69,4 @@ docs/_build/
 # Config (with sensitive data)
 config/local_*.yaml
 config/*.local.yaml
+venv_linux/
