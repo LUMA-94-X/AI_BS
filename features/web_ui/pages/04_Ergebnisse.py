@@ -70,14 +70,14 @@ try:
     with col3:
         st.metric(
             "Heizbedarf",
-            f"{kennzahlen.heizwaermebedarf_kwh_m2a:.1f} kWh/m²a",
+            f"{kennzahlen.heizkennzahl_kwh_m2a:.1f} kWh/m²a",
             help="Spezifischer Heizwärmebedarf"
         )
 
     with col4:
         st.metric(
             "Kühlbedarf",
-            f"{kennzahlen.kuehlbedarf_kwh_m2a:.1f} kWh/m²a",
+            f"{kennzahlen.kuehlkennzahl_kwh_m2a:.1f} kWh/m²a",
             help="Spezifischer Kühlbedarf"
         )
 
@@ -97,10 +97,8 @@ try:
 
     with col_komfort:
         st.subheader("🌡️ Thermischer Komfort")
-        komfort = kennzahlen.thermischer_komfort
-        if komfort == "Ausgezeichnet":
-            st.success(f"✅ {komfort}")
-        elif komfort == "Gut":
+        komfort = kennzahlen.thermische_behaglichkeit
+        if komfort == "Gut":
             st.success(f"✅ {komfort}")
         elif komfort == "Akzeptabel":
             st.info(f"ℹ️ {komfort}")
@@ -113,20 +111,25 @@ try:
 
     col1, col2, col3 = st.columns(3)
 
+    ergebnisse = kennzahlen.ergebnisse
+
     with col1:
         st.markdown("**Heizung**")
-        st.metric("Gesamt", f"{kennzahlen.heizenergie_gesamt_kwh:.0f} kWh")
-        st.metric("Spezifisch", f"{kennzahlen.heizwaermebedarf_kwh_m2a:.1f} kWh/m²a")
+        st.metric("Gesamt", f"{ergebnisse.heizbedarf_kwh:.0f} kWh")
+        st.metric("Spezifisch", f"{kennzahlen.heizkennzahl_kwh_m2a:.1f} kWh/m²a")
+        st.metric("Spitzenlast", f"{ergebnisse.spitzenlast_heizung_kw:.1f} kW")
 
     with col2:
         st.markdown("**Kühlung**")
-        st.metric("Gesamt", f"{kennzahlen.kuehlenergie_gesamt_kwh:.0f} kWh")
-        st.metric("Spezifisch", f"{kennzahlen.kuehlbedarf_kwh_m2a:.1f} kWh/m²a")
+        st.metric("Gesamt", f"{ergebnisse.kuehlbedarf_kwh:.0f} kWh")
+        st.metric("Spezifisch", f"{kennzahlen.kuehlkennzahl_kwh_m2a:.1f} kWh/m²a")
+        st.metric("Spitzenlast", f"{ergebnisse.spitzenlast_kuehlung_kw:.1f} kW")
 
     with col3:
         st.markdown("**Gesamt**")
-        st.metric("Gesamtenergie", f"{kennzahlen.gesamtenergie_kwh:.0f} kWh")
+        st.metric("Gesamtenergie", f"{ergebnisse.gesamtenergiebedarf_kwh:.0f} kWh")
         st.metric("Pro m²", f"{kennzahlen.energiekennzahl_kwh_m2a:.1f} kWh/m²a")
+        st.metric("Fläche", f"{kennzahlen.gesamtflaeche_m2:.1f} m²")
 
     # Visualisierungen
     st.markdown("---")
