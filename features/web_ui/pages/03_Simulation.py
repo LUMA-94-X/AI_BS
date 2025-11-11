@@ -135,7 +135,7 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
             start_time = time.time()
 
             result = runner.run_simulation(
-                idf_file=str(idf_path),
+                idf_path=str(idf_path),
                 weather_file=str(weather_path),
                 output_dir=str(output_dir)
             )
@@ -154,6 +154,7 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
 
                 # Erfolgs-Meldung
                 st.balloons()
+                error_file = result.output_dir / "eplusout.err"
                 st.success(f"""
                 ### 🎉 Simulation erfolgreich abgeschlossen!
 
@@ -162,7 +163,7 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
                 **Ausgabedateien:**
                 - IDF-Modell: `{idf_path}`
                 - SQL-Datenbank: `{result.sql_file}`
-                - Fehler-Log: `{result.error_file}`
+                - Fehler-Log: `{error_file}`
                 """)
 
                 # Navigation
@@ -172,6 +173,7 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
 
             else:
                 status_text.error("❌ Simulation fehlgeschlagen!")
+                error_file = result.output_dir / "eplusout.err"
                 st.error(f"""
                 ### ❌ Simulation fehlgeschlagen
 
@@ -179,13 +181,13 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
 
                 **Ausgabe-Verzeichnis:** `{output_dir}`
 
-                Prüfen Sie die Fehler-Datei: `{result.error_file}`
+                Prüfen Sie die Fehler-Datei: `{error_file}`
                 """)
 
                 # Zeige erste Zeilen der Fehler-Datei
-                if result.error_file and Path(result.error_file).exists():
+                if error_file.exists():
                     with st.expander("📄 Fehler-Log (erste 50 Zeilen)"):
-                        with open(result.error_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        with open(error_file, 'r', encoding='utf-8', errors='ignore') as f:
                             error_lines = f.readlines()[:50]
                             st.code(''.join(error_lines))
 
@@ -218,8 +220,9 @@ if 'simulation_result' in st.session_state:
         st.markdown("**Ergebnis-Dateien:**")
         if result.sql_file:
             st.write(f"- SQL-Datenbank: `{result.sql_file}`")
-        if result.error_file:
-            st.write(f"- Fehler-Log: `{result.error_file}`")
+        error_file = result.output_dir / "eplusout.err"
+        if error_file.exists():
+            st.write(f"- Fehler-Log: `{error_file}`")
 
         st.info("👉 Gehen Sie zur **Ergebnisse-Seite** für detaillierte Auswertungen.")
 
