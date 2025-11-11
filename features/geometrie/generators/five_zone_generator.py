@@ -1123,15 +1123,10 @@ class FiveZoneGenerator:
                     Fraction_Lost=0.0,
                 )
 
-                # Thermostat
-                idf.newidfobject(
-                    "HVACTEMPLATE:THERMOSTAT",
-                    Name=f"{zone_name}_Thermostat",
-                    Heating_Setpoint_Schedule_Name="HeatingSetpoint",
-                    Constant_Heating_Setpoint="",
-                    Cooling_Setpoint_Schedule_Name="CoolingSetpoint",
-                    Constant_Cooling_Setpoint="",
-                )
+                # HINWEIS: HVACTEMPLATE:THERMOSTAT wurde entfernt, weil:
+                # 1. create_building_with_hvac() fügt native ZONEHVAC-Objekte hinzu (kein HVACTemplate)
+                # 2. HVACTEMPLATE:THERMOSTAT alleine ist nutzlos ohne HVACTEMPLATE:ZONE:*
+                # 3. EnergyPlus beschwert sich über unvollständige HVACTemplate-Objekte
 
     def _add_infiltration(
         self,
