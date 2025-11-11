@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from eppy.modeleditor import IDF
-from src.utils.config import get_config
-from src.materials.standard_constructions import add_basic_constructions
+from core.config import get_config
+from core.materialien import add_basic_constructions
 
 
 @dataclass

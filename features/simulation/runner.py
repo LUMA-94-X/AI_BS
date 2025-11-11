@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from tqdm import tqdm
 
-from src.utils.config import get_config
+from core.config import get_config
 
 
 logger = logging.getLogger(__name__)
@@ -312,7 +312,7 @@ def main():
 
     # Load config if provided
     if args.config:
-        from src.utils.config import load_config
+        from core.config import load_config
         load_config(args.config)
 
     # Run simulation
