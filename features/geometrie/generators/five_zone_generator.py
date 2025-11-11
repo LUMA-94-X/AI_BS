@@ -129,6 +129,16 @@ class FiveZoneGenerator:
         idf = IDF(temp_idf_path)
         Path(temp_idf_path).unlink()
 
+        # CRITICAL: Add GlobalGeometryRules IMMEDIATELY after VERSION
+        # Must be before any geometry objects (surfaces, zones, etc.)
+        # Using 3 fields to match working EnergyPlus examples
+        idf.newidfobject(
+            "GLOBALGEOMETRYRULES",
+            Starting_Vertex_Position="UpperLeftCorner",
+            Vertex_Entry_Direction="Counterclockwise",
+            Coordinate_System="Relative",
+        )
+
         return idf
 
     def _get_idd_file(self) -> str:
@@ -242,15 +252,8 @@ class FiveZoneGenerator:
             Minimum_Number_of_Warmup_Days=6,
         )
 
-        # GlobalGeometryRules
-        idf.newidfobject(
-            "GLOBALGEOMETRYRULES",
-            Starting_Vertex_Position="UpperLeftCorner",
-            Vertex_Entry_Direction="Counterclockwise",
-            Coordinate_System="Relative",
-            Daylighting_Reference_Point_Coordinate_System="Relative",
-            Rectangular_Surface_Coordinate_System="Relative",
-        )
+        # NOTE: GlobalGeometryRules is now added in _initialize_idf()
+        # immediately after VERSION (critical for proper geometry parsing)
 
         # Timestep (4 per hour)
         idf.newidfobject("TIMESTEP", Number_of_Timesteps_per_Hour=4)

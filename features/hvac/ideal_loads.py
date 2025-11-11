@@ -125,6 +125,9 @@ class HVACTemplateManager:
 
         print(f"\n🔧 Applying HVAC template '{template_name}' to {len(zones)} zones...")
 
+        # Add global objects required for IdealLoads HVAC
+        self._ensure_global_objects(idf)
+
         # Add schedules if not present
         self._ensure_schedules(idf)
 
@@ -137,109 +140,202 @@ class HVACTemplateManager:
 
         return idf
 
+    def _ensure_global_objects(self, idf: IDF) -> None:
+        """Ensure global objects required for IdealLoads HVAC exist.
+
+        These are critical objects that must exist for EnergyPlus to run properly.
+        """
+        # Add SurfaceConvectionAlgorithm objects if missing
+        if not idf.idfobjects.get('SURFACECONVECTIONALGORITHM:INSIDE', []):
+            idf.newidfobject(
+                "SURFACECONVECTIONALGORITHM:INSIDE",
+                Algorithm="Simple"
+            )
+
+        if not idf.idfobjects.get('SURFACECONVECTIONALGORITHM:OUTSIDE', []):
+            idf.newidfobject(
+                "SURFACECONVECTIONALGORITHM:OUTSIDE",
+                Algorithm="SimpleCombined"
+            )
+
+        # Add Output:Diagnostics for better error reporting
+        if not idf.idfobjects.get('OUTPUT:DIAGNOSTICS', []):
+            idf.newidfobject(
+                "OUTPUT:DIAGNOSTICS",
+                Key_1="DisplayExtraWarnings"
+            )
+
+    def _ensure_schedule_type_limits(self, idf: IDF) -> None:
+        """Ensure ScheduleTypeLimits objects exist.
+
+        These define valid ranges and types for schedule values.
+        Critical for thermostat schedules to work properly.
+        """
+        # Remove existing type limits we'll recreate
+        for limit_name in ["Temperature", "Control Type"]:
+            existing = [
+                obj for obj in idf.idfobjects.get('SCHEDULETYPELIMITS', [])
+                if obj.Name == limit_name
+            ]
+            for obj in existing:
+                idf.removeidfobject(obj)
+
+        # Temperature type limits (for heating/cooling setpoints)
+        idf.newidfobject(
+            "SCHEDULETYPELIMITS",
+            Name="Temperature",
+            Lower_Limit_Value=-60,
+            Upper_Limit_Value=200,
+            Numeric_Type="CONTINUOUS",
+            Unit_Type="Temperature"
+        )
+
+        # Control Type limits (for thermostat control schedule)
+        idf.newidfobject(
+            "SCHEDULETYPELIMITS",
+            Name="Control Type",
+            Lower_Limit_Value=0,
+            Upper_Limit_Value=4,
+            Numeric_Type="DISCRETE"
+        )
+
     def _ensure_schedules(self, idf: IDF) -> None:
-        """Ensure required schedules exist in IDF."""
-        # Check if AlwaysOn schedule exists
-        always_on_exists = any(
-            sch.Name == "AlwaysOn"
-            for sch in idf.idfobjects.get('SCHEDULE:CONSTANT', [])
+        """Ensure required schedules exist in IDF.
+
+        Creates schedules following the pattern from EnergyPlus example.
+        Removes and recreates schedules to ensure correct values.
+        """
+        # First ensure ScheduleTypeLimits exist
+        self._ensure_schedule_type_limits(idf)
+
+        # Remove existing schedules that we need to recreate with correct values
+        for sch_name in ["AlwaysOn", "HeatingSetpoint", "CoolingSetpoint"]:
+            existing = [
+                sch for sch in idf.idfobjects.get('SCHEDULE:CONSTANT', [])
+                if sch.Name == sch_name
+            ]
+            for sch in existing:
+                idf.removeidfobject(sch)
+
+        # Remove existing DualSetpoint
+        existing_dsp = [
+            obj for obj in idf.idfobjects.get('THERMOSTATSETPOINT:DUALSETPOINT', [])
+            if obj.Name == "DualSetPoint"
+        ]
+        for obj in existing_dsp:
+            idf.removeidfobject(obj)
+
+        # Create AlwaysOn schedule (value = 4 for DualSetpoint control type)
+        idf.newidfobject(
+            "SCHEDULE:CONSTANT",
+            Name="AlwaysOn",
+            Schedule_Type_Limits_Name="Control Type",  # Must be discrete 0-4
+            Hourly_Value=4.0,  # 4 = DualSetpoint control type
         )
 
-        if not always_on_exists:
-            idf.newidfobject(
-                "SCHEDULE:CONSTANT",
-                Name="AlwaysOn",
-                Schedule_Type_Limits_Name="",
-                Hourly_Value=1.0,
-            )
-
-        # Add heating and cooling setpoint schedules if not present
-        heating_exists = any(
-            sch.Name == "HeatingSetpoint"
-            for sch in idf.idfobjects.get('SCHEDULE:CONSTANT', [])
-        )
-        cooling_exists = any(
-            sch.Name == "CoolingSetpoint"
-            for sch in idf.idfobjects.get('SCHEDULE:CONSTANT', [])
+        # Create Heating setpoint schedule (constant 20°C)
+        idf.newidfobject(
+            "SCHEDULE:CONSTANT",
+            Name="HeatingSetpoint",
+            Schedule_Type_Limits_Name="Temperature",  # Temperature range
+            Hourly_Value=20.0,  # 20°C heating setpoint
         )
 
-        if not heating_exists:
-            idf.newidfobject(
-                "SCHEDULE:CONSTANT",
-                Name="HeatingSetpoint",
-                Schedule_Type_Limits_Name="",
-                Hourly_Value=20.0,  # 20°C heating setpoint
-            )
+        # Create Cooling setpoint schedule (constant 26°C)
+        idf.newidfobject(
+            "SCHEDULE:CONSTANT",
+            Name="CoolingSetpoint",
+            Schedule_Type_Limits_Name="Temperature",  # Temperature range
+            Hourly_Value=26.0,  # 26°C cooling setpoint
+        )
 
-        if not cooling_exists:
-            idf.newidfobject(
-                "SCHEDULE:CONSTANT",
-                Name="CoolingSetpoint",
-                Schedule_Type_Limits_Name="",
-                Hourly_Value=26.0,  # 26°C cooling setpoint
-            )
+        # Create shared ThermostatSetpoint:DualSetpoint object
+        # All zones reference this same setpoint object
+        idf.newidfobject(
+            "THERMOSTATSETPOINT:DUALSETPOINT",
+            Name="DualSetPoint",
+            Heating_Setpoint_Temperature_Schedule_Name="HeatingSetpoint",
+            Cooling_Setpoint_Temperature_Schedule_Name="CoolingSetpoint",
+        )
 
     def _add_ideal_loads_to_zone(self, idf: IDF, zone_name: str) -> None:
-        """Add ideal loads air system to a specific zone using HVACTEMPLATE.
+        """Add ideal loads air system to a specific zone.
 
-        This uses the simpler HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM object
-        which EnergyPlus's ExpandObjects program will automatically convert
-        to full HVAC objects. This is much more robust than creating
-        ZONEHVAC objects directly.
+        Uses the proven approach from EnergyPlus example file:
+        5Zone_IdealLoadsAirSystems_ReturnPlenum.idf
+
+        This creates direct ZONEHVAC objects with the exact syntax
+        that EnergyPlus expects (verified to work in v25.1).
 
         Args:
             idf: IDF object
             zone_name: Name of the zone
         """
-        # Check if HVAC template already exists for this zone
-        existing_template = [
-            obj for obj in idf.idfobjects.get('HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM', [])
-            if zone_name in obj.Zone_Name
-        ]
-
+        # Check if HVAC already exists for this zone
         existing_hvac = [
             obj for obj in idf.idfobjects.get('ZONEHVAC:IDEALLOADSAIRSYSTEM', [])
             if zone_name in obj.Name
         ]
 
-        if existing_template or existing_hvac:
+        if existing_hvac:
             print(f"   ⚠️  Zone '{zone_name}' already has HVAC, skipping")
             return
 
-        # Add HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM
-        # This is the SIMPLE approach - ExpandObjects will create all the complex objects
+        # Add ZoneHVAC:IdealLoadsAirSystem
+        # Syntax from working EnergyPlus example (5Zone_IdealLoadsAirSystems_ReturnPlenum.idf)
         idf.newidfobject(
-            "HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM",
-            Zone_Name=zone_name,
-            Template_Thermostat_Name="",  # Will use zone thermostat
-            System_Availability_Schedule_Name="AlwaysOn",
+            "ZONEHVAC:IDEALLOADSAIRSYSTEM",
+            Name=f"{zone_name}_IdealLoads",
+            Availability_Schedule_Name="",  # blank = always available
+            Zone_Supply_Air_Node_Name=f"{zone_name}_Supply_Node",
+            Zone_Exhaust_Air_Node_Name="",
+            System_Inlet_Air_Node_Name="",
             Maximum_Heating_Supply_Air_Temperature=50.0,
             Minimum_Cooling_Supply_Air_Temperature=13.0,
-            Maximum_Heating_Supply_Air_Humidity_Ratio=0.0156,
-            Minimum_Cooling_Supply_Air_Humidity_Ratio=0.0077,
+            Maximum_Heating_Supply_Air_Humidity_Ratio=0.015,
+            Minimum_Cooling_Supply_Air_Humidity_Ratio=0.009,
             Heating_Limit="NoLimit",
-            Maximum_Heating_Air_Flow_Rate="",
+            Maximum_Heating_Air_Flow_Rate="autosize",  # IMPORTANT: "autosize" not blank!
             Maximum_Sensible_Heating_Capacity="",
             Cooling_Limit="NoLimit",
-            Maximum_Cooling_Air_Flow_Rate="",
+            Maximum_Cooling_Air_Flow_Rate="autosize",  # IMPORTANT: "autosize" not blank!
             Maximum_Total_Cooling_Capacity="",
             Heating_Availability_Schedule_Name="",
             Cooling_Availability_Schedule_Name="",
-            Dehumidification_Control_Type="None",
+            Dehumidification_Control_Type="ConstantSupplyHumidityRatio",  # From example!
             Cooling_Sensible_Heat_Ratio="",
-            Dehumidification_Setpoint=60.0,
-            Humidification_Control_Type="None",
-            Humidification_Setpoint=30.0,
-            Outdoor_Air_Method="None",
-            Outdoor_Air_Flow_Rate_per_Person=0.0,
-            Outdoor_Air_Flow_Rate_per_Zone_Floor_Area=0.0,
-            Outdoor_Air_Flow_Rate_per_Zone=0.0,
+            Humidification_Control_Type="ConstantSupplyHumidityRatio",  # From example!
             Design_Specification_Outdoor_Air_Object_Name="",
-            Demand_Controlled_Ventilation_Type="None",
-            Outdoor_Air_Economizer_Type="NoEconomizer",
-            Heat_Recovery_Type="None",
-            Sensible_Heat_Recovery_Effectiveness=0.70,
-            Latent_Heat_Recovery_Effectiveness=0.65,
+            Outdoor_Air_Inlet_Node_Name="",
+            Demand_Controlled_Ventilation_Type="",
+            Outdoor_Air_Economizer_Type="",
+            Heat_Recovery_Type="",
+            Sensible_Heat_Recovery_Effectiveness="",
+            Latent_Heat_Recovery_Effectiveness="",
+        )
+
+        # Add ZoneHVAC:EquipmentList
+        idf.newidfobject(
+            "ZONEHVAC:EQUIPMENTLIST",
+            Name=f"{zone_name}_Equipment_List",
+            Load_Distribution_Scheme="SequentialLoad",
+            Zone_Equipment_1_Object_Type="ZoneHVAC:IdealLoadsAirSystem",
+            Zone_Equipment_1_Name=f"{zone_name}_IdealLoads",
+            Zone_Equipment_1_Cooling_Sequence=1,
+            Zone_Equipment_1_Heating_or_NoLoad_Sequence=1,
+            Zone_Equipment_1_Sequential_Cooling_Fraction_Schedule_Name="",
+            Zone_Equipment_1_Sequential_Heating_Fraction_Schedule_Name="",
+        )
+
+        # Add ZoneHVAC:EquipmentConnections
+        idf.newidfobject(
+            "ZONEHVAC:EQUIPMENTCONNECTIONS",
+            Zone_Name=zone_name,
+            Zone_Conditioning_Equipment_List_Name=f"{zone_name}_Equipment_List",
+            Zone_Air_Inlet_Node_or_NodeList_Name=f"{zone_name}_Supply_Node",
+            Zone_Air_Exhaust_Node_or_NodeList_Name="",
+            Zone_Air_Node_Name=f"{zone_name}_Air_Node",
+            Zone_Return_Air_Node_or_NodeList_Name=f"{zone_name}_Return_Node",
         )
 
         # CRITICAL: Add ZoneControl:Thermostat
@@ -249,20 +345,12 @@ class HVACTemplateManager:
             "ZONECONTROL:THERMOSTAT",
             Name=f"{zone_name}_Thermostat",
             Zone_or_ZoneList_Name=zone_name,
-            Control_Type_Schedule_Name="AlwaysOn",
+            Control_Type_Schedule_Name="AlwaysOn",  # Schedule that = 4 (Dual Setpoint)
             Control_1_Object_Type="ThermostatSetpoint:DualSetpoint",
-            Control_1_Name=f"{zone_name}_DualSetpoint",
+            Control_1_Name="DualSetPoint",  # Shared setpoint for all zones
         )
 
-        # Add ThermostatSetpoint:DualSetpoint
-        idf.newidfobject(
-            "THERMOSTATSETPOINT:DUALSETPOINT",
-            Name=f"{zone_name}_DualSetpoint",
-            Heating_Setpoint_Temperature_Schedule_Name="HeatingSetpoint",
-            Cooling_Setpoint_Temperature_Schedule_Name="CoolingSetpoint",
-        )
-
-        print(f"   ✅ Added ideal loads HVAC template to zone '{zone_name}'")
+        print(f"   ✅ Added ideal loads HVAC to zone '{zone_name}'")
 
     def copy_hvac_from_example(
         self,
