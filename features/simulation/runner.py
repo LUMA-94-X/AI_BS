@@ -365,13 +365,21 @@ class EnergyPlusRunner:
             with open(err_file, 'r') as f:
                 content = f.read()
 
+            # Check for fatal errors first
+            if "** Fatal **" in content or "**  Fatal  **" in content:
+                return False
+
             # EnergyPlus writes "EnergyPlus Completed Successfully" on success
             if "EnergyPlus Completed Successfully" in content:
                 return True
 
-            # Check for fatal errors
-            if "** Fatal **" in content or "**  Fatal  **" in content:
-                return False
+            # If err file is empty or very small, check for SQL file as success indicator
+            # (Sometimes EnergyPlus doesn't write to err file on success)
+            if len(content.strip()) < 50:
+                sql_file = err_file.parent / "eplusout.sql"
+                if sql_file.exists() and sql_file.stat().st_size > 1000:
+                    logger.info("Err file empty, but SQL file exists → Success")
+                    return True
 
             return False
 
