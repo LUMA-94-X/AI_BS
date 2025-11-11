@@ -1,0 +1,101 @@
+# Default Configuration for EnergyPlus Automation Tool
+
+# EnergyPlus Installation
+energyplus:
+  # Path to EnergyPlus installation directory
+  # Leave empty for auto-detection or set explicitly
+  installation_path: "/home/luma/EnergyPlus-23.2.0-7636e6b3e9-Linux-Ubuntu22.04-x86_64"
+
+  # EnergyPlus version (optional, for validation)
+  version: "23.2"
+
+  # Path to EnergyPlus executable
+  # If empty, will be auto-detected from installation_path
+  executable: ""
+
+# Simulation Settings
+simulation:
+  # Output directory for simulation results
+  output_dir: "output"
+
+  # Number of parallel simulations
+  num_processes: 4
+
+  # Keep intermediate files after simulation
+  keep_intermediate_files: false
+
+  # Timeout for single simulation (seconds)
+  timeout: 3600
+
+# Weather Data
+weather:
+  # Directory containing EPW weather files
+  data_dir: "data/weather"
+
+  # Default weather file (if not specified per simulation)
+  default_file: ""
+
+# Building Standards
+standards:
+  # Directory containing building standard definitions
+  data_dir: "data/standards"
+
+  # Default standard to use
+  default_standard: "ISO_13790"
+
+  # Available standards
+  available:
+    - "ISO_13790"
+    - "TABULA_DE"
+    - "ASHRAE_90_1"
+    - "EN_15459"
+
+# Geometry Settings
+geometry:
+  # Default building parameters
+  defaults:
+    floor_height: 3.0  # meters
+    window_wall_ratio: 0.3
+    orientation: 0  # degrees (0 = North)
+    num_floors: 2
+
+  # Minimum zone size to prevent EnergyPlus errors
+  min_zone_volume: 10.0  # cubic meters
+
+# Materials and Constructions
+materials:
+  # Directory containing material definitions
+  data_dir: "data/materials"
+
+  # Database file for materials
+  database: "materials_database.json"
+
+# HVAC Settings
+hvac:
+  # Default HVAC type
+  default_type: "IdealLoadsAirSystem"
+
+  # Available HVAC templates
+  templates_dir: "src/templates/hvac"
+
+# Post-Processing
+postprocessing:
+  # Variables to extract from results
+  output_variables:
+    - "Zone Mean Air Temperature"
+    - "Zone Air System Sensible Heating Energy"
+    - "Zone Air System Sensible Cooling Energy"
+    - "Lights Electric Energy"
+    - "Electric Equipment Electric Energy"
+
+  # Reporting frequency
+  reporting_frequency: "Hourly"
+
+  # Generate plots automatically
+  auto_plot: false
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_file: "energyplus_automation.log"
+  console_output: true
