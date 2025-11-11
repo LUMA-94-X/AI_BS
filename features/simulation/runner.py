@@ -66,7 +66,8 @@ class EnergyPlusRunner:
         try:
             with open(idf_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            return 'HVACTemplate:' in content
+            # Case-insensitive search for HVACTEMPLATE objects
+            return 'HVACTEMPLATE:' in content.upper()
         except Exception as e:
             logger.warning(f"Could not check IDF for HVACTemplate objects: {e}")
             return False

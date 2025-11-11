@@ -180,74 +180,66 @@ class HVACTemplateManager:
             )
 
     def _add_ideal_loads_to_zone(self, idf: IDF, zone_name: str) -> None:
-        """Add ideal loads air system to a specific zone.
+        """Add ideal loads air system to a specific zone using HVACTEMPLATE.
+
+        This uses the simpler HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM object
+        which EnergyPlus's ExpandObjects program will automatically convert
+        to full HVAC objects. This is much more robust than creating
+        ZONEHVAC objects directly.
 
         Args:
             idf: IDF object
             zone_name: Name of the zone
         """
-        # Check if HVAC already exists for this zone
-        existing = [
+        # Check if HVAC template already exists for this zone
+        existing_template = [
+            obj for obj in idf.idfobjects.get('HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM', [])
+            if zone_name in obj.Zone_Name
+        ]
+
+        existing_hvac = [
             obj for obj in idf.idfobjects.get('ZONEHVAC:IDEALLOADSAIRSYSTEM', [])
             if zone_name in obj.Name
         ]
 
-        if existing:
+        if existing_template or existing_hvac:
             print(f"   ⚠️  Zone '{zone_name}' already has HVAC, skipping")
             return
 
-        # Add ZoneHVAC:IdealLoadsAirSystem
+        # Add HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM
+        # This is the SIMPLE approach - ExpandObjects will create all the complex objects
         idf.newidfobject(
-            "ZONEHVAC:IDEALLOADSAIRSYSTEM",
-            Name=f"{zone_name}_IdealLoads",
-            Zone_Supply_Air_Node_Name=f"{zone_name}_Supply_Node",
-            Zone_Exhaust_Air_Node_Name="",
-            System_Inlet_Air_Node_Name="",
+            "HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM",
+            Zone_Name=zone_name,
+            Template_Thermostat_Name="",  # Will use zone thermostat
+            System_Availability_Schedule_Name="AlwaysOn",
             Maximum_Heating_Supply_Air_Temperature=50.0,
             Minimum_Cooling_Supply_Air_Temperature=13.0,
-            Maximum_Heating_Supply_Air_Humidity_Ratio=0.015,
-            Minimum_Cooling_Supply_Air_Humidity_Ratio=0.010,
+            Maximum_Heating_Supply_Air_Humidity_Ratio=0.0156,
+            Minimum_Cooling_Supply_Air_Humidity_Ratio=0.0077,
             Heating_Limit="NoLimit",
             Maximum_Heating_Air_Flow_Rate="",
             Maximum_Sensible_Heating_Capacity="",
             Cooling_Limit="NoLimit",
             Maximum_Cooling_Air_Flow_Rate="",
             Maximum_Total_Cooling_Capacity="",
-            Heating_Availability_Schedule_Name="AlwaysOn",
-            Cooling_Availability_Schedule_Name="AlwaysOn",
+            Heating_Availability_Schedule_Name="",
+            Cooling_Availability_Schedule_Name="",
             Dehumidification_Control_Type="None",
             Cooling_Sensible_Heat_Ratio="",
+            Dehumidification_Setpoint=60.0,
             Humidification_Control_Type="None",
+            Humidification_Setpoint=30.0,
+            Outdoor_Air_Method="None",
+            Outdoor_Air_Flow_Rate_per_Person=0.0,
+            Outdoor_Air_Flow_Rate_per_Zone_Floor_Area=0.0,
+            Outdoor_Air_Flow_Rate_per_Zone=0.0,
             Design_Specification_Outdoor_Air_Object_Name="",
             Demand_Controlled_Ventilation_Type="None",
             Outdoor_Air_Economizer_Type="NoEconomizer",
             Heat_Recovery_Type="None",
             Sensible_Heat_Recovery_Effectiveness=0.70,
             Latent_Heat_Recovery_Effectiveness=0.65,
-        )
-
-        # Add ZoneHVAC:EquipmentList
-        idf.newidfobject(
-            "ZONEHVAC:EQUIPMENTLIST",
-            Name=f"{zone_name}_Equipment_List",
-            Load_Distribution_Scheme="SequentialLoad",
-            Zone_Equipment_1_Object_Type="ZoneHVAC:IdealLoadsAirSystem",
-            Zone_Equipment_1_Name=f"{zone_name}_IdealLoads",
-            Zone_Equipment_1_Cooling_Sequence=1,
-            Zone_Equipment_1_Heating_or_NoLoad_Sequence=1,
-            Zone_Equipment_1_Sequential_Cooling_Fraction_Schedule_Name="",
-            Zone_Equipment_1_Sequential_Heating_Fraction_Schedule_Name="",
-        )
-
-        # Add ZoneHVAC:EquipmentConnections
-        idf.newidfobject(
-            "ZONEHVAC:EQUIPMENTCONNECTIONS",
-            Zone_Name=zone_name,
-            Zone_Conditioning_Equipment_List_Name=f"{zone_name}_Equipment_List",
-            Zone_Air_Inlet_Node_or_NodeList_Name=f"{zone_name}_Supply_Node",
-            Zone_Air_Exhaust_Node_or_NodeList_Name="",
-            Zone_Air_Node_Name=f"{zone_name}_Air_Node",
-            Zone_Return_Air_Node_or_NodeList_Name=f"{zone_name}_Return_Node",
         )
 
         # CRITICAL: Add ZoneControl:Thermostat
@@ -270,7 +262,7 @@ class HVACTemplateManager:
             Cooling_Setpoint_Temperature_Schedule_Name="CoolingSetpoint",
         )
 
-        print(f"   ✅ Added ideal loads HVAC to zone '{zone_name}'")
+        print(f"   ✅ Added ideal loads HVAC template to zone '{zone_name}'")
 
     def copy_hvac_from_example(
         self,
