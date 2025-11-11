@@ -138,8 +138,7 @@ class FiveZoneGenerator:
 
         ep_path_str = self.config.energyplus.installation_path
 
-        # Konvertiere NUR wenn wir in WSL laufen (erkennbar an /mnt/ im cwd oder platform)
-        # In Windows (auch mit forward slashes) KEINE Konvertierung!
+        # Erkenne ob wir in WSL laufen
         cwd = os.getcwd()
         running_in_wsl = cwd.startswith("/mnt/") or (platform.system() == "Linux" and os.path.exists("/mnt/c"))
 
@@ -147,7 +146,17 @@ class FiveZoneGenerator:
             # Wir sind in WSL: Konvertiere C:/ zu /mnt/c/
             if ep_path_str.startswith("C:/") or ep_path_str.startswith("C:\\"):
                 ep_path_str = ep_path_str.replace("C:/", "/mnt/c/").replace("C:\\", "/mnt/c/").replace("\\", "/")
-        # Sonst (Windows): Behalte Original-Pfad
+        else:
+            # Wir sind in Windows: Konvertiere /mnt/c/ zu C:/
+            if ep_path_str.startswith("/mnt/c/"):
+                ep_path_str = ep_path_str.replace("/mnt/c/", "C:/")
+            elif ep_path_str.startswith("/mnt/"):
+                # Andere Laufwerke: /mnt/d/ -> D:/, etc.
+                parts = ep_path_str[5:].split("/", 1)  # Skip "/mnt/"
+                if len(parts) >= 1:
+                    drive = parts[0].upper()
+                    rest = parts[1] if len(parts) > 1 else ""
+                    ep_path_str = f"{drive}:/{rest}"
 
         ep_path = Path(ep_path_str)
         idd_path = ep_path / "Energy+.idd"

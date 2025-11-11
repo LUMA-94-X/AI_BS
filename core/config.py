@@ -21,10 +21,11 @@ class EnergyPlusConfig(BaseModel):
             return Path(self.executable)
 
         if self.installation_path:
-            base_path = Path(self.installation_path)
+            base_path_str = self.installation_path
         else:
             # Auto-detect based on operating system
             base_path = self._auto_detect_installation()
+            base_path_str = str(base_path)
 
         # Determine executable name based on OS
         # Special handling for WSL: if installation_path points to Windows (C:/ or /mnt/c/),
@@ -39,6 +40,25 @@ class EnergyPlusConfig(BaseModel):
                     is_wsl = 'microsoft' in f.read().lower()
             except:
                 pass
+
+        # Path conversion: WSL ↔ Windows
+        if is_wsl:
+            # Running in WSL: Convert C:/ to /mnt/c/
+            if base_path_str.startswith("C:/") or base_path_str.startswith("C:\\"):
+                base_path_str = base_path_str.replace("C:/", "/mnt/c/").replace("C:\\", "/mnt/c/")
+        elif system == "Windows":
+            # Running in Windows: Convert /mnt/c/ to C:/
+            if base_path_str.startswith("/mnt/c/"):
+                base_path_str = base_path_str.replace("/mnt/c/", "C:/")
+            elif base_path_str.startswith("/mnt/"):
+                # Other drives: /mnt/d/ -> D:/
+                parts = base_path_str[5:].split("/", 1)
+                if len(parts) >= 1:
+                    drive = parts[0].upper()
+                    rest = parts[1] if len(parts) > 1 else ""
+                    base_path_str = f"{drive}:/{rest}"
+
+        base_path = Path(base_path_str)
 
         # Use .exe if Windows or WSL (where we use Windows EnergyPlus)
         if system == "Windows" or is_wsl:
