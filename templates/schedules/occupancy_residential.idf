@@ -1,3 +1,11 @@
+!-   ===========  ALL OBJECTS IN CLASS: SCHEDULETYPELIMITS ===========
+
+SCHEDULETYPELIMITS,
+    Fraction,                !- Name
+    0.0,                     !- Lower Limit Value
+    1.0,                     !- Upper Limit Value
+    Continuous;              !- Numeric Type
+
 !-   ===========  ALL OBJECTS IN CLASS: SCHEDULE:COMPACT ===========
 
 SCHEDULE:COMPACT,
