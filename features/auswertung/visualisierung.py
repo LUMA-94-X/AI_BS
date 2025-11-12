@@ -5,6 +5,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from pathlib import Path
 from typing import Optional, List
+import pandas as pd
 
 from features.auswertung.sql_parser import EnergyPlusSQLParser
 from features.auswertung.kpi_rechner import GebaeudeKennzahlen
@@ -246,6 +247,127 @@ class ErgebnisVisualisierer:
 
         return fig
 
+    def erstelle_interaktive_temperaturkurve(
+        self,
+        sql_file: Path | str,
+        start_tag: int = 1,
+        anzahl_tage: int = 7,
+        titel: str = "Raumtemperaturverlauf"
+    ) -> go.Figure:
+        """Erstelle interaktive Temperaturkurve mit voller Kontrolle.
+
+        Args:
+            sql_file: Path zur SQL-Datei
+            start_tag: Startag des Jahres (1-365)
+            anzahl_tage: Anzahl der anzuzeigenden Tage
+            titel: Titel des Diagramms
+
+        Returns:
+            Plotly Figure mit interaktiver Temperaturkurve
+        """
+        with EnergyPlusSQLParser(sql_file) as parser:
+            df = parser.get_timeseries_data('Zone Mean Air Temperature')
+
+        if df.empty:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Keine Temperaturdaten verfügbar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=16)
+            )
+            return fig
+
+        # Berechne Start- und End-Index
+        start_hour = (start_tag - 1) * 24
+        end_hour = start_hour + (anzahl_tage * 24)
+
+        # Limitiere auf den gewählten Zeitraum
+        df_slice = df.iloc[start_hour:end_hour]
+
+        if df_slice.empty:
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"Keine Daten für Tag {start_tag}-{start_tag + anzahl_tage}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=16)
+            )
+            return fig
+
+        fig = go.Figure()
+
+        # Haupttemperaturkurve
+        fig.add_trace(go.Scatter(
+            x=df_slice['datetime'],
+            y=df_slice['Zone Mean Air Temperature'],
+            mode='lines',
+            name='Raumtemperatur',
+            line=dict(color='#FF6B6B', width=2.5),
+            hovertemplate='<b>%{x}</b><br>Temperatur: %{y:.1f}°C<extra></extra>'
+        ))
+
+        # Komfortbereich markieren (20-26°C)
+        fig.add_hrect(
+            y0=20, y1=26,
+            fillcolor='green', opacity=0.1,
+            line_width=0,
+            annotation_text="Komfortbereich (20-26°C)",
+            annotation_position="top right",
+            annotation=dict(font_size=10, font_color="green")
+        )
+
+        # Heiz-Grenze (< 20°C)
+        fig.add_hline(
+            y=20,
+            line_dash="dash",
+            line_color="orange",
+            annotation_text="Heiz-Solltemperatur",
+            annotation_position="right",
+            annotation=dict(font_size=9, font_color="orange")
+        )
+
+        # Kühl-Grenze (> 26°C)
+        fig.add_hline(
+            y=26,
+            line_dash="dash",
+            line_color="blue",
+            annotation_text="Kühl-Solltemperatur",
+            annotation_position="right",
+            annotation=dict(font_size=9, font_color="blue")
+        )
+
+        # Statistiken im Zeitraum
+        temp_min = df_slice['Zone Mean Air Temperature'].min()
+        temp_max = df_slice['Zone Mean Air Temperature'].max()
+        temp_mean = df_slice['Zone Mean Air Temperature'].mean()
+
+        fig.update_layout(
+            title=dict(
+                text=f"{titel}<br><sub>Tag {start_tag} bis {start_tag + anzahl_tage - 1} des Jahres | "
+                     f"Ø {temp_mean:.1f}°C | Min {temp_min:.1f}°C | Max {temp_max:.1f}°C</sub>",
+                x=0.5,
+                xanchor='center'
+            ),
+            xaxis_title="Datum/Zeit",
+            yaxis_title="Temperatur [°C]",
+            height=500,
+            showlegend=True,
+            hovermode='x unified',
+            plot_bgcolor='rgba(240, 240, 240, 0.5)',
+            xaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(200, 200, 200, 0.3)'
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(200, 200, 200, 0.3)',
+                range=[temp_min - 2, temp_max + 2]  # Etwas Padding
+            )
+        )
+
+        return fig
+
     def erstelle_dashboard(
         self,
         kennzahlen: GebaeudeKennzahlen,
@@ -266,7 +388,7 @@ class ErgebnisVisualisierer:
                 'Energiebilanz',
                 'Spezifische Kennzahlen',
                 'Monatliche Energiebilanz',
-                'Raumtemperaturverlauf (7 Tage)'
+                'Raumtemperaturverlauf (Jahresübersicht)'
             ),
             specs=[
                 [{'type': 'pie'}, {'type': 'bar'}],
@@ -323,13 +445,40 @@ class ErgebnisVisualisierer:
                 row=2, col=1
             )
 
-        # 4. Temperaturverlauf
+        # 4. Temperaturverlauf (Jahresübersicht mit täglichen Durchschnittswerten)
         with EnergyPlusSQLParser(sql_file) as parser:
-            df_temp = parser.get_timeseries_data('Zone Mean Air Temperature').head(7 * 24)
+            df_temp = parser.get_timeseries_data('Zone Mean Air Temperature')
 
         if not df_temp.empty:
+            # Aggregiere auf Tagesbasis für bessere Lesbarkeit im Dashboard
+            df_temp['date'] = df_temp['datetime'].dt.date
+            df_temp_daily = df_temp.groupby('date')['Zone Mean Air Temperature'].mean().reset_index()
+            df_temp_daily['datetime'] = pd.to_datetime(df_temp_daily['date'])
+
+            # Komfortbereich als gefüllter Bereich (vor der Temperaturkurve)
             fig.add_trace(
-                go.Scatter(x=df_temp['datetime'], y=df_temp['Zone Mean Air Temperature'], mode='lines', name='Temperatur', line=dict(color='#FF6B6B'), showlegend=False),
+                go.Scatter(
+                    x=df_temp_daily['datetime'].tolist() + df_temp_daily['datetime'].tolist()[::-1],
+                    y=[20]*len(df_temp_daily) + [26]*len(df_temp_daily),
+                    fill='toself',
+                    fillcolor='rgba(0, 255, 0, 0.1)',
+                    line=dict(width=0),
+                    showlegend=False,
+                    hoverinfo='skip'
+                ),
+                row=2, col=2
+            )
+
+            # Temperaturkurve
+            fig.add_trace(
+                go.Scatter(
+                    x=df_temp_daily['datetime'],
+                    y=df_temp_daily['Zone Mean Air Temperature'],
+                    mode='lines',
+                    name='Temperatur',
+                    line=dict(color='#FF6B6B', width=1.5),
+                    showlegend=False
+                ),
                 row=2, col=2
             )
 

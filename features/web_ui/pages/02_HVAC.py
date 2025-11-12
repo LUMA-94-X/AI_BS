@@ -25,7 +25,7 @@ building_model = get_building_model_from_session(st.session_state)
 has_geometry = 'geometry' in st.session_state
 
 if not building_model and not has_geometry:
-    st.warning("⚠️ Bitte definieren Sie zuerst ein Gebäudemodell:\n- **Energieausweis-Seite** für 5-Zone-Modell (empfohlen)\n- **Geometrie-Seite** für SimpleBox")
+    st.warning("⚠️ Bitte definieren Sie zuerst ein Gebäudemodell auf der **Geometrie-Seite**:\n- Tab 'Einfache Eingabe' für SimpleBox\n- Tab 'Energieausweis' für 5-Zone-Modell (empfohlen)")
     st.stop()
 
 # Kontextuelle Info: Welches Modell wird konfiguriert?
