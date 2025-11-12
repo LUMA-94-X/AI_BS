@@ -20,6 +20,7 @@ from features.geometrie.utils.fenster_distribution import (
     OrientationWWR,
     Orientation
 )
+from features.internal_loads.native_loads import NativeInternalLoadsManager
 
 
 class FiveZoneGenerator:
@@ -95,9 +96,8 @@ class FiveZoneGenerator:
         self._add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
 
         # 9. Schedules & Internal Loads
-        self._add_schedules(idf)
-        # ✅ FIXED: Internal loads now use templates (see ISSUE_PEOPLE_CRASH.md)
-        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
+        schedules = self._add_schedules(idf, building_type=ea_data.gebaeudetyp)
+        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp, schedules)
 
         # 10. Infiltration
         if ea_data.effective_infiltration > 0:
@@ -196,9 +196,8 @@ class FiveZoneGenerator:
         self._add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
 
         # 9. Schedules & Internal Loads
-        self._add_schedules(idf)
-        # ✅ FIXED: Internal loads now use templates (see ISSUE_PEOPLE_CRASH.md)
-        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
+        schedules = self._add_schedules(idf, building_type=ea_data.gebaeudetyp)
+        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp, schedules)
 
         # 10. Infiltration
         if ea_data.effective_infiltration > 0:
@@ -1209,161 +1208,98 @@ class FiveZoneGenerator:
     # SCHEDULES & INTERNAL LOADS
     # ========================================================================
 
-    def _add_schedules(self, idf: IDF) -> None:
-        """Fügt Standard-Schedules hinzu."""
-
-        # Note: ScheduleTypeLimits and Schedules are created by ideal_loads HVAC system
-        # (Temperature, Control Type, HeatingSetpoint, CoolingSetpoint, AlwaysOn)
-
-        # Occupancy (Werktags 8-18 Uhr) - Disabled (see ISSUE_PEOPLE_CRASH.md)
-        # idf.newidfobject(
-        #     "SCHEDULE:COMPACT",
-        #     Name="OccupancySchedule",
-        #     Schedule_Type_Limits_Name="Fraction",
-        #     Field_1="Through: 12/31",
-        #     Field_2="For: Weekdays",
-        #     Field_3="Until: 8:00",
-        #     Field_4="0.0",
-        #     Field_5="Until: 18:00",
-        #     Field_6="1.0",
-        #     Field_7="Until: 24:00",
-        #     Field_8="0.0",
-        #     Field_9="For: Weekend Holidays",
-        #     Field_10="Until: 24:00",
-        #     Field_11="0.0",
-        # )
-
-        # Activity Level (120 W/Person) - Disabled (see ISSUE_PEOPLE_CRASH.md)
-        # idf.newidfobject(
-        #     "SCHEDULE:CONSTANT",
-        #     Name="ActivityLevel",
-        #     Schedule_Type_Limits_Name="ActivityLevel",
-        #     Hourly_Value=120.0,
-        # )
-
-        # Thermostat Schedules - Not needed, ideal_loads creates them
-        # (HeatingSetpoint, CoolingSetpoint, AlwaysOn with correct types)
-
-    def _load_template_with_zone(self, template_path: Path, zone_name: str) -> str:
-        """
-        Lädt IDF-Template und ersetzt ZONE_NAME Platzhalter.
+    def _add_schedules(self, idf: IDF, building_type) -> Dict[str, str]:
+        """Fügt Standard-Schedules hinzu via NativeInternalLoadsManager.
 
         Args:
-            template_path: Pfad zum Template-File
-            zone_name: Echter Zone-Name zum Ersetzen
+            idf: IDF object
+            building_type: GebaeudeTyp enum or string
 
         Returns:
-            IDF-Content als String mit ersetztem Zone-Namen
+            Dict mapping schedule type to schedule name
         """
-        if not template_path.exists():
-            raise FileNotFoundError(f"Template nicht gefunden: {template_path}")
+        # Map GebaeudeTyp enum to internal building types
+        from features.geometrie.models.energieausweis_input import GebaeudeTyp
 
-        content = template_path.read_text(encoding='utf-8')
-        return content.replace('ZONE_NAME', zone_name)
+        if isinstance(building_type, GebaeudeTyp):
+            # EFH/MFH -> residential, NWG -> office
+            if building_type in (GebaeudeTyp.EFH, GebaeudeTyp.MFH):
+                building_type_str = "residential"
+            else:  # NWG
+                building_type_str = "office"
+        else:
+            building_type_str = str(building_type)
 
-    def _merge_template_objects(
-        self,
-        idf: IDF,
-        template_content: str,
-        object_types: list[str]
-    ) -> None:
-        """
-        Merged Objekte aus Template-Content in IDF.
+        # Use proven native approach for schedules
+        manager = NativeInternalLoadsManager()
+        schedules = manager.add_schedules(idf, building_type_str)
 
-        Args:
-            idf: Haupt-IDF-Objekt
-            template_content: Template-Content als String
-            object_types: Liste der zu kopierenden Objekt-Typen (z.B. ["PEOPLE", "SCHEDULE:COMPACT"])
-        """
-        # Erstelle temporäres IDF aus Template
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.idf', delete=False, encoding='utf-8') as tmp:
-            tmp.write(template_content)
-            tmp_path = tmp.name
-
-        try:
-            template_idf = IDF(tmp_path)
-
-            # Kopiere gewünschte Objekte
-            for obj_type in object_types:
-                for obj in template_idf.idfobjects[obj_type]:
-                    idf.copyidfobject(obj)
-        finally:
-            # Cleanup
-            Path(tmp_path).unlink(missing_ok=True)
+        return schedules
 
     def _add_internal_loads(
         self,
         idf: IDF,
         layouts: Dict[int, ZoneLayout],
-        gebaeudetyp
+        gebaeudetyp,
+        schedules: Dict[str, str]
     ) -> None:
-        """
-        Fügt Internal Loads (People, Lights, Equipment) aus Templates hinzu.
+        """Fügt Internal Loads (People, Lights, Equipment) hinzu.
 
-        Umgeht eppy-Bugs durch template-basierten Ansatz.
-        Siehe: ISSUE_PEOPLE_CRASH.md
+        Uses NativeInternalLoadsManager for proven, stable implementation.
+
+        Args:
+            idf: IDF object
+            layouts: Zone layouts per floor
+            gebaeudetyp: GebaeudeTyp enum
+            schedules: Schedule names dict from _add_schedules()
         """
+        # Map GebaeudeTyp enum to internal types
         from features.geometrie.models.energieausweis_input import GebaeudeTyp
 
-        # Template-Auswahl basierend auf Gebäudetyp
-        template_dir = Path(__file__).parent.parent.parent.parent / "templates"
-
-        if gebaeudetyp == GebaeudeTyp.NWG:
-            # Bürogebäude
-            people_template = "people_office_0.05.idf"
-            lights_template = "lights_office_10w.idf"
-            equipment_template = "equipment_office_5w.idf"
-            schedule_template = "occupancy_office_8_18.idf"
+        if isinstance(gebaeudetyp, GebaeudeTyp):
+            # EFH/MFH -> residential, NWG -> office
+            if gebaeudetyp in (GebaeudeTyp.EFH, GebaeudeTyp.MFH):
+                building_type = "residential"
+            else:  # NWG
+                building_type = "office"
         else:
-            # Wohngebäude (EFH/MFH)
-            people_template = "people_residential_0.02.idf"
-            lights_template = "lights_residential_5w.idf"
-            equipment_template = "equipment_residential_3w.idf"
-            schedule_template = "occupancy_residential.idf"
+            building_type = "office"  # fallback
 
-        # Schedules nur einmal hinzufügen (werden von allen Zonen geteilt)
-        schedules_loaded = False
+        # Use proven NativeInternalLoadsManager
+        manager = NativeInternalLoadsManager()
+
+        # Collect all zone names and areas
+        zone_names = []
+        zone_areas = {}
 
         for floor_num, layout in layouts.items():
             for orient, zone_geom in layout.all_zones.items():
                 zone_name = zone_geom.name
+                zone_names.append(zone_name)
+                # Calculate zone area from geometry
+                zone_areas[zone_name] = zone_geom.floor_area
 
-                # Schedules (nur beim ersten Mal laden)
-                if not schedules_loaded:
-                    # OccupancySchedule
-                    schedule_path = template_dir / "schedules" / schedule_template
-                    schedule_content = schedule_path.read_text(encoding='utf-8')
-                    self._merge_template_objects(
-                        idf,
-                        schedule_content,
-                        ["SCHEDULETYPELIMITS", "SCHEDULE:COMPACT"]
-                    )
+        # Add all internal loads using proven native approach
+        for zone_name in zone_names:
+            area = zone_areas[zone_name]
 
-                    # ActivityLevelSchedule
-                    activity_path = template_dir / "schedules" / "activity_level_120w.idf"
-                    activity_content = activity_path.read_text(encoding='utf-8')
-                    self._merge_template_objects(
-                        idf,
-                        activity_content,
-                        ["SCHEDULETYPELIMITS", "SCHEDULE:COMPACT"]
-                    )
+            manager.add_people_to_zone(
+                idf, zone_name, area, building_type,
+                schedules["occupancy"], schedules["activity"]
+            )
+            manager.add_lights_to_zone(
+                idf, zone_name, area, building_type,
+                schedules["lights"]
+            )
+            manager.add_equipment_to_zone(
+                idf, zone_name, area, building_type,
+                schedules["equipment"]
+            )
 
-                    schedules_loaded = True
-
-                # PEOPLE
-                people_path = template_dir / "internal_loads" / people_template
-                people_content = self._load_template_with_zone(people_path, zone_name)
-                self._merge_template_objects(idf, people_content, ["PEOPLE"])
-
-                # LIGHTS
-                lights_path = template_dir / "internal_loads" / lights_template
-                lights_content = self._load_template_with_zone(lights_path, zone_name)
-                self._merge_template_objects(idf, lights_content, ["LIGHTS"])
-
-                # ELECTRICEQUIPMENT
-                equipment_path = template_dir / "internal_loads" / equipment_template
-                equipment_content = self._load_template_with_zone(equipment_path, zone_name)
-                self._merge_template_objects(idf, equipment_content, ["ELECTRICEQUIPMENT"])
+                # HINWEIS: HVACTEMPLATE:THERMOSTAT wurde entfernt, weil:
+                # 1. create_building_with_hvac() fügt native ZONEHVAC-Objekte hinzu (kein HVACTemplate)
+                # 2. HVACTEMPLATE:THERMOSTAT alleine ist nutzlos ohne HVACTEMPLATE:ZONE:*
+                # 3. EnergyPlus beschwert sich über unvollständige HVACTemplate-Objekte
 
     def _add_infiltration(
         self,
