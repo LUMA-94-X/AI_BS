@@ -317,15 +317,16 @@ class HVACTemplateManager:
         Uses HVACTEMPLATE:THERMOSTAT which ExpandObjects will convert
         to proper thermostat objects.
         """
-        # Check if thermostat already exists
+        # Check if thermostat already exists - remove old ones
         existing = [
             obj for obj in idf.idfobjects.get('HVACTEMPLATE:THERMOSTAT', [])
-            if obj.Name == "All Zones"
         ]
 
         if existing:
-            print("   ℹ️  Shared thermostat already exists, skipping")
-            return
+            # Remove ALL old thermostats (might be per-zone ones from old version)
+            print(f"   🔄 Removing {len(existing)} old thermostat(s) and replacing with shared one...")
+            for obj in existing:
+                idf.removeidfobject(obj)
 
         # Load thermostat template
         template_path = self.templates_dir / "thermostat_shared.idf"
@@ -371,19 +372,26 @@ class HVACTemplateManager:
             idf: IDF object
             zone_name: Name of the zone
         """
-        # Check if HVAC already exists for this zone
+        # Check if HVAC already exists for this zone - REMOVE old ones first
         existing_hvac_template = [
             obj for obj in idf.idfobjects.get('HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM', [])
             if obj.Zone_Name == zone_name
         ]
+
+        if existing_hvac_template:
+            print(f"   🔄 Zone '{zone_name}' has old HVAC - removing and replacing...")
+            for obj in existing_hvac_template:
+                idf.removeidfobject(obj)
+
+        # Also remove any direct ZONEHVAC objects (shouldn't exist with templates, but clean up)
         existing_hvac_direct = [
             obj for obj in idf.idfobjects.get('ZONEHVAC:IDEALLOADSAIRSYSTEM', [])
             if zone_name in obj.Name
         ]
-
-        if existing_hvac_template or existing_hvac_direct:
-            print(f"   ⚠️  Zone '{zone_name}' already has HVAC, skipping")
-            return
+        if existing_hvac_direct:
+            print(f"   🔄 Removing {len(existing_hvac_direct)} old ZONEHVAC objects...")
+            for obj in existing_hvac_direct:
+                idf.removeidfobject(obj)
 
         # Load and apply template
         template_path = self.templates_dir / "ideal_loads.idf"
