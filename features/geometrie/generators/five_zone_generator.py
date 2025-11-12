@@ -1208,24 +1208,31 @@ class FiveZoneGenerator:
     # SCHEDULES & INTERNAL LOADS
     # ========================================================================
 
-    def _add_schedules(self, idf: IDF, building_type: str = "office") -> Dict[str, str]:
+    def _add_schedules(self, idf: IDF, building_type) -> Dict[str, str]:
         """Fügt Standard-Schedules hinzu via NativeInternalLoadsManager.
 
         Args:
             idf: IDF object
-            building_type: Building type (office, residential)
+            building_type: GebaeudeTyp enum or string
 
         Returns:
             Dict mapping schedule type to schedule name
         """
+        # Map GebaeudeTyp enum to internal building types
+        from features.geometrie.models.energieausweis_input import GebaeudeTyp
+
+        if isinstance(building_type, GebaeudeTyp):
+            # EFH/MFH -> residential, NWG -> office
+            if building_type in (GebaeudeTyp.EFH, GebaeudeTyp.MFH):
+                building_type_str = "residential"
+            else:  # NWG
+                building_type_str = "office"
+        else:
+            building_type_str = str(building_type)
+
         # Use proven native approach for schedules
         manager = NativeInternalLoadsManager()
-        schedules = manager.add_schedules(idf, building_type)
-
-        # Add legacy schedule names for backward compatibility
-        # Map new schedule names to old expected names
-        # OccupancySchedule -> Always_On_Occupancy
-        # ActivityLevel -> Activity_Level_Schedule
+        schedules = manager.add_schedules(idf, building_type_str)
 
         return schedules
 
@@ -1233,7 +1240,7 @@ class FiveZoneGenerator:
         self,
         idf: IDF,
         layouts: Dict[int, ZoneLayout],
-        gebaeudetyp: str,
+        gebaeudetyp,
         schedules: Dict[str, str]
     ) -> None:
         """Fügt Internal Loads (People, Lights, Equipment) hinzu.
@@ -1243,15 +1250,20 @@ class FiveZoneGenerator:
         Args:
             idf: IDF object
             layouts: Zone layouts per floor
-            gebaeudetyp: Building type (Wohngebäude, Nichtwohngebäude)
+            gebaeudetyp: GebaeudeTyp enum
             schedules: Schedule names dict from _add_schedules()
         """
-        # Map Energieausweis types to internal types
-        building_type_map = {
-            "Wohngebäude": "residential",
-            "Nichtwohngebäude": "office",
-        }
-        building_type = building_type_map.get(gebaeudetyp, "office")
+        # Map GebaeudeTyp enum to internal types
+        from features.geometrie.models.energieausweis_input import GebaeudeTyp
+
+        if isinstance(gebaeudetyp, GebaeudeTyp):
+            # EFH/MFH -> residential, NWG -> office
+            if gebaeudetyp in (GebaeudeTyp.EFH, GebaeudeTyp.MFH):
+                building_type = "residential"
+            else:  # NWG
+                building_type = "office"
+        else:
+            building_type = "office"  # fallback
 
         # Use proven NativeInternalLoadsManager
         manager = NativeInternalLoadsManager()
