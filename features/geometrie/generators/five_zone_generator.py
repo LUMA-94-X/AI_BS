@@ -1353,7 +1353,7 @@ class FiveZoneGenerator:
                 # PEOPLE
                 people_path = template_dir / "internal_loads" / people_template
                 people_content = self._load_template_with_zone(people_path, zone_name)
-                self._merge_template_objects(idf, people_content, ["PEOPLE", "SCHEDULE:COMPACT"])
+                self._merge_template_objects(idf, people_content, ["PEOPLE"])
 
                 # LIGHTS
                 lights_path = template_dir / "internal_loads" / lights_template
