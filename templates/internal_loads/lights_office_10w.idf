@@ -1,0 +1,17 @@
+!- Template für LIGHTS: Büro mit 10 W/m²
+!- ZONE_NAME wird beim Laden durch echten Zone-Namen ersetzt
+
+LIGHTS,
+    ZONE_NAME_Lights,                               !- Name
+    ZONE_NAME,                                      !- Zone or ZoneList or Space or SpaceList Name
+    OccupancySchedule,                              !- Schedule Name
+    Watts/Area,                                     !- Design Level Calculation Method
+    ,                                               !- Lighting Level {W}
+    10.0,                                           !- Watts per Floor Area {W/m2}
+    ,                                               !- Watts per Person {W/person}
+    0.0,                                            !- Return Air Fraction
+    0.42,                                           !- Fraction Radiant
+    0.18,                                           !- Fraction Visible
+    1.0,                                            !- Fraction Replaceable
+    General,                                        !- End-Use Subcategory
+    No;                                             !- Return Air Fraction Calculated from Plenum Temperature

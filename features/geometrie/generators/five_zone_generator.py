@@ -96,8 +96,8 @@ class FiveZoneGenerator:
 
         # 9. Schedules & Internal Loads
         self._add_schedules(idf)
-        # TODO: Internal loads disabled due to PEOPLE crash (see ISSUE_PEOPLE_CRASH.md)
-        # self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
+        # ✅ FIXED: Internal loads now use templates (see ISSUE_PEOPLE_CRASH.md)
+        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
 
         # 10. Infiltration
         if ea_data.effective_infiltration > 0:
@@ -197,8 +197,8 @@ class FiveZoneGenerator:
 
         # 9. Schedules & Internal Loads
         self._add_schedules(idf)
-        # TODO: Internal loads disabled due to PEOPLE crash (see ISSUE_PEOPLE_CRASH.md)
-        # self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
+        # ✅ FIXED: Internal loads now use templates (see ISSUE_PEOPLE_CRASH.md)
+        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
 
         # 10. Infiltration
         if ea_data.effective_infiltration > 0:
@@ -1244,82 +1244,126 @@ class FiveZoneGenerator:
         # Thermostat Schedules - Not needed, ideal_loads creates them
         # (HeatingSetpoint, CoolingSetpoint, AlwaysOn with correct types)
 
+    def _load_template_with_zone(self, template_path: Path, zone_name: str) -> str:
+        """
+        Lädt IDF-Template und ersetzt ZONE_NAME Platzhalter.
+
+        Args:
+            template_path: Pfad zum Template-File
+            zone_name: Echter Zone-Name zum Ersetzen
+
+        Returns:
+            IDF-Content als String mit ersetztem Zone-Namen
+        """
+        if not template_path.exists():
+            raise FileNotFoundError(f"Template nicht gefunden: {template_path}")
+
+        content = template_path.read_text(encoding='utf-8')
+        return content.replace('ZONE_NAME', zone_name)
+
+    def _merge_template_objects(
+        self,
+        idf: IDF,
+        template_content: str,
+        object_types: list[str]
+    ) -> None:
+        """
+        Merged Objekte aus Template-Content in IDF.
+
+        Args:
+            idf: Haupt-IDF-Objekt
+            template_content: Template-Content als String
+            object_types: Liste der zu kopierenden Objekt-Typen (z.B. ["PEOPLE", "SCHEDULE:COMPACT"])
+        """
+        # Erstelle temporäres IDF aus Template
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.idf', delete=False, encoding='utf-8') as tmp:
+            tmp.write(template_content)
+            tmp_path = tmp.name
+
+        try:
+            template_idf = IDF(tmp_path)
+
+            # Kopiere gewünschte Objekte
+            for obj_type in object_types:
+                for obj in template_idf.idfobjects[obj_type]:
+                    idf.copyidfobject(obj)
+        finally:
+            # Cleanup
+            Path(tmp_path).unlink(missing_ok=True)
+
     def _add_internal_loads(
         self,
         idf: IDF,
         layouts: Dict[int, ZoneLayout],
         gebaeudetyp
     ) -> None:
-        """Fügt Internal Loads (People, Lights, Equipment) hinzu."""
+        """
+        Fügt Internal Loads (People, Lights, Equipment) aus Templates hinzu.
 
-        # Standard-Werte (können später nach Gebäudetyp differenziert werden)
-        people_per_m2 = 0.05  # Personen pro m²
-        lights_w_per_m2 = 10.0  # W/m²
-        equipment_w_per_m2 = 5.0  # W/m²
+        Umgeht eppy-Bugs durch template-basierten Ansatz.
+        Siehe: ISSUE_PEOPLE_CRASH.md
+        """
+        from features.geometrie.models.energieausweis_input import GebaeudeTyp
+
+        # Template-Auswahl basierend auf Gebäudetyp
+        template_dir = Path(__file__).parent.parent.parent.parent / "templates"
+
+        if gebaeudetyp == GebaeudeTyp.NWG:
+            # Bürogebäude
+            people_template = "people_office_0.05.idf"
+            lights_template = "lights_office_10w.idf"
+            equipment_template = "equipment_office_5w.idf"
+            schedule_template = "occupancy_office_8_18.idf"
+        else:
+            # Wohngebäude (EFH/MFH)
+            people_template = "people_residential_0.02.idf"
+            lights_template = "lights_residential_5w.idf"
+            equipment_template = "equipment_residential_3w.idf"
+            schedule_template = "occupancy_residential.idf"
+
+        # Schedules nur einmal hinzufügen (werden von allen Zonen geteilt)
+        schedules_loaded = False
 
         for floor_num, layout in layouts.items():
             for orient, zone_geom in layout.all_zones.items():
                 zone_name = zone_geom.name
 
-                # People
-                people_obj = idf.newidfobject(
-                    "PEOPLE",
-                    Name=f"{zone_name}_People",
-                    Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
-                    Number_of_People_Schedule_Name="OccupancySchedule",
-                    Number_of_People_Calculation_Method="People/Area",
-                    Number_of_People="",
-                    People_per_Floor_Area=people_per_m2,
-                    Floor_Area_per_Person="",
-                    Fraction_Radiant=0.3,
-                    Sensible_Heat_Fraction=0.7,  # 70% sensible, 30% latent (typical for office)
-                    Activity_Level_Schedule_Name="ActivityLevel",
-                    Carbon_Dioxide_Generation_Rate=3.82e-08,
-                    Enable_ASHRAE_55_Comfort_Warnings="No",
-                    Mean_Radiant_Temperature_Calculation_Type="",  # Empty = ZoneAveraged (default)
-                    Surface_NameAngle_Factor_List_Name="",
-                    Work_Efficiency_Schedule_Name="",
-                    Clothing_Insulation_Calculation_Method="DynamicClothingModelASHRAE55",  # Doesn't need schedule!
-                    Clothing_Insulation_Calculation_Method_Schedule_Name="",
-                    Clothing_Insulation_Schedule_Name="",
-                    Air_Velocity_Schedule_Name="",
-                )
+                # Schedules (nur beim ersten Mal laden)
+                if not schedules_loaded:
+                    # OccupancySchedule
+                    schedule_path = template_dir / "schedules" / schedule_template
+                    schedule_content = schedule_path.read_text(encoding='utf-8')
+                    self._merge_template_objects(
+                        idf,
+                        schedule_content,
+                        ["SCHEDULETYPELIMITS", "SCHEDULE:COMPACT"]
+                    )
 
-                # Lights
-                idf.newidfobject(
-                    "LIGHTS",
-                    Name=f"{zone_name}_Lights",
-                    Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
-                    Schedule_Name="OccupancySchedule",
-                    Design_Level_Calculation_Method="Watts/Area",
-                    Lighting_Level="",
-                    Watts_per_Floor_Area=lights_w_per_m2,
-                    Watts_per_Person="",
-                    Return_Air_Fraction=0.0,
-                    Fraction_Radiant=0.4,
-                    Fraction_Visible=0.2,
-                    Fraction_Replaceable=1.0,
-                )
+                    # ActivityLevelSchedule
+                    activity_path = template_dir / "schedules" / "activity_level_120w.idf"
+                    activity_content = activity_path.read_text(encoding='utf-8')
+                    self._merge_template_objects(
+                        idf,
+                        activity_content,
+                        ["SCHEDULETYPELIMITS", "SCHEDULE:COMPACT"]
+                    )
 
-                # Electric Equipment
-                idf.newidfobject(
-                    "ELECTRICEQUIPMENT",
-                    Name=f"{zone_name}_Equipment",
-                    Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
-                    Schedule_Name="OccupancySchedule",
-                    Design_Level_Calculation_Method="Watts/Area",
-                    Design_Level="",
-                    Watts_per_Floor_Area=equipment_w_per_m2,
-                    Watts_per_Person="",
-                    Fraction_Latent=0.0,
-                    Fraction_Radiant=0.3,
-                    Fraction_Lost=0.0,
-                )
+                    schedules_loaded = True
 
-                # HINWEIS: HVACTEMPLATE:THERMOSTAT wurde entfernt, weil:
-                # 1. create_building_with_hvac() fügt native ZONEHVAC-Objekte hinzu (kein HVACTemplate)
-                # 2. HVACTEMPLATE:THERMOSTAT alleine ist nutzlos ohne HVACTEMPLATE:ZONE:*
-                # 3. EnergyPlus beschwert sich über unvollständige HVACTemplate-Objekte
+                # PEOPLE
+                people_path = template_dir / "internal_loads" / people_template
+                people_content = self._load_template_with_zone(people_path, zone_name)
+                self._merge_template_objects(idf, people_content, ["PEOPLE", "SCHEDULE:COMPACT"])
+
+                # LIGHTS
+                lights_path = template_dir / "internal_loads" / lights_template
+                lights_content = self._load_template_with_zone(lights_path, zone_name)
+                self._merge_template_objects(idf, lights_content, ["LIGHTS"])
+
+                # ELECTRICEQUIPMENT
+                equipment_path = template_dir / "internal_loads" / equipment_template
+                equipment_content = self._load_template_with_zone(equipment_path, zone_name)
+                self._merge_template_objects(idf, equipment_content, ["ELECTRICEQUIPMENT"])
 
     def _add_infiltration(
         self,

@@ -258,106 +258,145 @@ class HVACTemplateManager:
             Cooling_Setpoint_Temperature_Schedule_Name="CoolingSetpoint",
         )
 
+    def _load_template_with_zone(self, template_path: Path, zone_name: str) -> str:
+        """
+        Lädt HVAC-Template und ersetzt ZONE_NAME Platzhalter.
+
+        Args:
+            template_path: Pfad zum Template-File
+            zone_name: Echter Zone-Name zum Ersetzen
+
+        Returns:
+            IDF-Content als String mit ersetztem Zone-Namen
+        """
+        if not template_path.exists():
+            raise FileNotFoundError(f"HVAC Template nicht gefunden: {template_path}")
+
+        content = template_path.read_text(encoding='utf-8')
+        return content.replace('ZONE_NAME', zone_name)
+
+    def _merge_template_objects(
+        self,
+        idf: IDF,
+        template_content: str,
+        object_types: list[str]
+    ) -> None:
+        """
+        Merged Objekte aus Template-Content in IDF.
+
+        Args:
+            idf: Haupt-IDF-Objekt
+            template_content: Template-Content als String
+            object_types: Liste der zu kopierenden Objekt-Typen
+        """
+        import tempfile
+
+        # Erstelle temporäres IDF aus Template
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.idf', delete=False, encoding='utf-8') as tmp:
+            tmp.write(template_content)
+            tmp_path = tmp.name
+
+        try:
+            template_idf = IDF(tmp_path)
+
+            # Kopiere gewünschte Objekte
+            for obj_type in object_types:
+                for obj in template_idf.idfobjects[obj_type]:
+                    idf.copyidfobject(obj)
+        finally:
+            # Cleanup
+            Path(tmp_path).unlink(missing_ok=True)
+
     def _add_ideal_loads_to_zone(self, idf: IDF, zone_name: str) -> None:
-        """Add ideal loads air system to a specific zone.
+        """
+        Add ideal loads air system to a specific zone using HVACTEMPLATE.
 
-        Uses the proven approach from EnergyPlus example file:
-        5Zone_IdealLoadsAirSystems_ReturnPlenum.idf
+        ✅ FIXED: Now uses HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM instead of direct ZONEHVAC
+        This avoids eppy field order bugs that caused simulation crashes.
 
-        This creates direct ZONEHVAC objects with the exact syntax
-        that EnergyPlus expects (verified to work in v25.1).
+        See: SIMULATION_CRASH_ANALYSIS.md
 
         Args:
             idf: IDF object
             zone_name: Name of the zone
         """
         # Check if HVAC already exists for this zone
-        existing_hvac = [
+        existing_hvac_template = [
+            obj for obj in idf.idfobjects.get('HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM', [])
+            if obj.Zone_Name == zone_name
+        ]
+        existing_hvac_direct = [
             obj for obj in idf.idfobjects.get('ZONEHVAC:IDEALLOADSAIRSYSTEM', [])
             if zone_name in obj.Name
         ]
 
-        if existing_hvac:
+        if existing_hvac_template or existing_hvac_direct:
             print(f"   ⚠️  Zone '{zone_name}' already has HVAC, skipping")
             return
 
-        # Add ZoneHVAC:IdealLoadsAirSystem
-        # Syntax from working EnergyPlus example (5Zone_IdealLoadsAirSystems_ReturnPlenum.idf)
+        # Load and apply template
+        template_path = self.templates_dir / "ideal_loads.idf"
+
+        if not template_path.exists():
+            # Fallback: Create HVACTEMPLATE objects directly
+            print(f"   ⚠️  Template not found, creating HVACTEMPLATE objects directly")
+            self._add_hvactemplate_direct(idf, zone_name)
+            return
+
+        # Load template with zone name
+        template_content = self._load_template_with_zone(template_path, zone_name)
+
+        # Merge HVACTEMPLATE objects
+        self._merge_template_objects(
+            idf,
+            template_content,
+            ["HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM", "HVACTEMPLATE:THERMOSTAT"]
+        )
+
+        print(f"   ✅ Added ideal loads HVAC to zone '{zone_name}' (via HVACTEMPLATE)")
+
+    def _add_hvactemplate_direct(self, idf: IDF, zone_name: str) -> None:
+        """
+        Fallback: Create HVACTEMPLATE objects directly if template file not found.
+
+        Args:
+            idf: IDF object
+            zone_name: Name of the zone
+        """
+        # HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM
         idf.newidfobject(
-            "ZONEHVAC:IDEALLOADSAIRSYSTEM",
-            Name=f"{zone_name}_IdealLoads",
-            Availability_Schedule_Name="",  # blank = always available
-            Zone_Supply_Air_Node_Name=f"{zone_name}_Supply_Node",
-            Zone_Exhaust_Air_Node_Name="",
-            System_Inlet_Air_Node_Name="",
+            "HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM",
+            Zone_Name=zone_name,
+            Template_Thermostat_Name="",
+            System_Availability_Schedule_Name="",
             Maximum_Heating_Supply_Air_Temperature=50.0,
             Minimum_Cooling_Supply_Air_Temperature=13.0,
             Maximum_Heating_Supply_Air_Humidity_Ratio=0.015,
             Minimum_Cooling_Supply_Air_Humidity_Ratio=0.009,
             Heating_Limit="NoLimit",
-            Maximum_Heating_Air_Flow_Rate="autosize",  # IMPORTANT: "autosize" not blank!
+            Maximum_Heating_Air_Flow_Rate="",
             Maximum_Sensible_Heating_Capacity="",
             Cooling_Limit="NoLimit",
-            Maximum_Cooling_Air_Flow_Rate="autosize",  # IMPORTANT: "autosize" not blank!
+            Maximum_Cooling_Air_Flow_Rate="",
             Maximum_Total_Cooling_Capacity="",
             Heating_Availability_Schedule_Name="",
             Cooling_Availability_Schedule_Name="",
-            Dehumidification_Control_Type="ConstantSupplyHumidityRatio",  # From example!
+            Dehumidification_Control_Type="ConstantSupplyHumidityRatio",
             Cooling_Sensible_Heat_Ratio="",
-            Humidification_Control_Type="ConstantSupplyHumidityRatio",  # From example!
-            Design_Specification_Outdoor_Air_Object_Name="",
-            Outdoor_Air_Inlet_Node_Name="",
-            Demand_Controlled_Ventilation_Type="",
-            Outdoor_Air_Economizer_Type="",
-            Heat_Recovery_Type="",
-            Sensible_Heat_Recovery_Effectiveness="",
-            Latent_Heat_Recovery_Effectiveness="",
+            Humidification_Control_Type="ConstantSupplyHumidityRatio",
         )
 
-        # Add ZoneHVAC:EquipmentList
+        # HVACTEMPLATE:THERMOSTAT
         idf.newidfobject(
-            "ZONEHVAC:EQUIPMENTLIST",
-            Name=f"{zone_name}_Equipment_List",
-            Load_Distribution_Scheme="SequentialLoad",
-            Zone_Equipment_1_Object_Type="ZoneHVAC:IdealLoadsAirSystem",
-            Zone_Equipment_1_Name=f"{zone_name}_IdealLoads",
-            Zone_Equipment_1_Cooling_Sequence=1,
-            Zone_Equipment_1_Heating_or_NoLoad_Sequence=1,
-            Zone_Equipment_1_Sequential_Cooling_Fraction_Schedule_Name="",
-            Zone_Equipment_1_Sequential_Heating_Fraction_Schedule_Name="",
+            "HVACTEMPLATE:THERMOSTAT",
+            Name=f"{zone_name}_Thermostat",
+            Heating_Setpoint_Schedule_Name="",
+            Constant_Heating_Setpoint=21.0,
+            Cooling_Setpoint_Schedule_Name="",
+            Constant_Cooling_Setpoint=24.0,
         )
 
-        # Add ZoneHVAC:EquipmentConnections
-        idf.newidfobject(
-            "ZONEHVAC:EQUIPMENTCONNECTIONS",
-            Zone_Name=zone_name,
-            Zone_Conditioning_Equipment_List_Name=f"{zone_name}_Equipment_List",
-            Zone_Air_Inlet_Node_or_NodeList_Name=f"{zone_name}_Supply_Node",
-            Zone_Air_Exhaust_Node_or_NodeList_Name="",
-            Zone_Air_Node_Name=f"{zone_name}_Air_Node",
-            Zone_Return_Air_Node_or_NodeList_Name=f"{zone_name}_Return_Node",
-        )
-
-        # CRITICAL: Add ZoneControl:Thermostat (if not exists)
-        # IdealLoads HVAC requires thermostats to control heating/cooling
-        # Without this, EnergyPlus will crash during initialization!
-        thermostat_name = f"{zone_name}_Thermostat"
-        existing_thermostat = [
-            obj for obj in idf.idfobjects.get('ZONECONTROL:THERMOSTAT', [])
-            if obj.Name == thermostat_name
-        ]
-
-        if not existing_thermostat:
-            idf.newidfobject(
-                "ZONECONTROL:THERMOSTAT",
-                Name=thermostat_name,
-                Zone_or_ZoneList_Name=zone_name,
-                Control_Type_Schedule_Name="AlwaysOn",  # Schedule that = 4 (Dual Setpoint)
-                Control_1_Object_Type="ThermostatSetpoint:DualSetpoint",
-                Control_1_Name="DualSetPoint",  # Shared setpoint for all zones
-            )
-
-        print(f"   ✅ Added ideal loads HVAC to zone '{zone_name}'")
+        print(f"   ✅ Added HVACTEMPLATE objects directly for zone '{zone_name}'")
 
     def copy_hvac_from_example(
         self,

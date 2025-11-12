@@ -1,0 +1,39 @@
+!- Ideal Loads Air System Template
+!- Nutzt HVACTEMPLATE (simpler und zuverlässiger als direkte ZONEHVAC-Objekte)
+!- ZONE_NAME wird beim Laden durch echten Zone-Namen ersetzt
+
+HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM,
+    ZONE_NAME,                           !- Zone Name
+    ,                                     !- Template Thermostat Name (blank = auto)
+    ,                                     !- System Availability Schedule Name (blank = always on)
+    50.0,                                 !- Maximum Heating Supply Air Temperature {C}
+    13.0,                                 !- Minimum Cooling Supply Air Temperature {C}
+    0.015,                                !- Maximum Heating Supply Air Humidity Ratio {kgWater/kgDryAir}
+    0.009,                                !- Minimum Cooling Supply Air Humidity Ratio {kgWater/kgDryAir}
+    NoLimit,                              !- Heating Limit
+    ,                                     !- Maximum Heating Air Flow Rate {m3/s} (blank = autosize)
+    ,                                     !- Maximum Sensible Heating Capacity {W} (blank = autosize)
+    NoLimit,                              !- Cooling Limit
+    ,                                     !- Maximum Cooling Air Flow Rate {m3/s} (blank = autosize)
+    ,                                     !- Maximum Total Cooling Capacity {W} (blank = autosize)
+    ,                                     !- Heating Availability Schedule Name (blank = always on)
+    ,                                     !- Cooling Availability Schedule Name (blank = always on)
+    ConstantSupplyHumidityRatio,          !- Dehumidification Control Type
+    ,                                     !- Cooling Sensible Heat Ratio {dimensionless}
+    ConstantSupplyHumidityRatio,          !- Humidification Control Type
+    ,                                     !- Design Specification Outdoor Air Object Name
+    ,                                     !- Outdoor Air Inlet Node Name
+    ,                                     !- Demand Controlled Ventilation Type
+    ,                                     !- Outdoor Air Economizer Type
+    ,                                     !- Heat Recovery Type
+    ,                                     !- Sensible Heat Recovery Effectiveness {dimensionless}
+    ;                                     !- Latent Heat Recovery Effectiveness {dimensionless}
+
+!- HVACTEMPLATE:THERMOSTAT for zones
+!- This creates consistent heating/cooling setpoints
+HVACTEMPLATE:THERMOSTAT,
+    ZONE_NAME_Thermostat,                !- Name
+    ,                                     !- Heating Setpoint Schedule Name (blank = constant 21°C)
+    21.0,                                 !- Constant Heating Setpoint {C}
+    ,                                     !- Cooling Setpoint Schedule Name (blank = constant 24°C)
+    24.0;                                 !- Constant Cooling Setpoint {C}
