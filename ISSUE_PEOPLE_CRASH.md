@@ -2,7 +2,16 @@
 
 **GitHub Issue:** https://github.com/LUMA-94-X/AI_BS/issues/5
 
-## Problem
+## ✅ STATUS: FIXED (2025-11-12)
+
+**Solution:** Native eppy approach using `idf.newidfobject()` instead of templates.
+**Implementation:** `features/internal_loads/native_loads.py`
+**Integration:** `features/geometrie/generators/five_zone_generator.py`
+**Test Results:** ✅ 12MB SQL, 0 Severe Errors, 30 Internal Loads (PEOPLE+LIGHTS+EQUIPMENT)
+
+---
+
+## Problem (Original)
 Das Hinzufügen von PEOPLE/LIGHTS/ELECTRICEQUIPMENT-Objekten via eppy führt zu einem Silent Crash von EnergyPlus:
 - Exit Code: 5
 - Error-Datei: 0 Bytes (leer!)
@@ -127,15 +136,50 @@ def _add_internal_loads_from_template(self, idf: IDF, zone_name: str, gebaeudety
             new_obj.Name = f"{zone_name}_{load_type.capitalize()}"
 ```
 
+## ✅ FINAL SOLUTION (2025-11-12)
+
+### Native Approach: `NativeInternalLoadsManager`
+
+Created `features/internal_loads/native_loads.py` using direct `idf.newidfobject()` calls:
+
+```python
+# NO templates, NO ExpandObjects, NO complexity!
+idf.newidfobject(
+    "PEOPLE",
+    Name=f"{zone_name}_People",
+    Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
+    Number_of_People_Calculation_Method="People/Area",
+    People_per_Floor_Area=0.05,  # office: 1 person per 20m²
+    Fraction_Radiant=0.3,
+    Activity_Level_Schedule_Name="Activity_Level_Schedule",
+)
+```
+
+### Key Benefits:
+1. ✅ **No ExpandObjects required** (unlike HVACTEMPLATE approach)
+2. ✅ **No Energy+.idd issues** (runs directly)
+3. ✅ **Same approach as working HVAC** (proven stable)
+4. ✅ **Simple schedules** (SCHEDULE:CONSTANT for testing)
+5. ✅ **Type-safe** (GebaeudeTyp.EFH/MFH → residential, NWG → office)
+
+### Test Results:
+```
+✅ Simulation: simulation_20251112_220239
+✅ SQL Size: 12 MB
+✅ Timesteps: Full year (613,200 data points = ~70 variables * 8760 hours)
+✅ Internal Loads: 10 PEOPLE + 10 LIGHTS + 10 ELECTRICEQUIPMENT = 30 objects
+✅ Errors: 0 Severe Errors, 15 Warnings (all non-critical)
+✅ EnergyPlus: Completed Successfully (13.52 sec)
+```
+
 ## Status
 - [x] Problem identifiziert
-- [x] Mehrere Fixes getestet (alle erfolglos)
-- [x] Workaround implementiert (Internal Loads deaktiviert)
-- [x] Generator funktioniert fehlerfrei ohne Internal Loads (8760 Timesteps, 6MB SQL)
-- [ ] Standard-Ressourcen erstellen (internal_loads, schedules, materials, constructions)
-- [ ] Templates in Generator integrieren
-- [ ] Validierung: Templates einzeln simulieren
-- [ ] PEOPLE/LIGHTS/EQUIPMENT re-aktivieren und testen
+- [x] Mehrere Fixes getestet
+- [x] Template-based approach tried (failed due to ExpandObjects issues)
+- [x] ✅ **FIXED with Native Approach** (NativeInternalLoadsManager)
+- [x] Integration in FiveZoneGenerator
+- [x] End-to-end testing via UI
+- [x] Full year simulation successful
 
 ## Dateien
 - Generator: `features/geometrie/generators/five_zone_generator.py` (Zeilen 1286-1350)
