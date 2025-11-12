@@ -131,6 +131,9 @@ class HVACTemplateManager:
         # Add schedules if not present
         self._ensure_schedules(idf)
 
+        # Add shared thermostat ONCE for all zones
+        self._add_shared_thermostat(idf)
+
         # Add HVAC for each zone
         for zone in zones:
             zone_name = zone.Name
@@ -307,6 +310,54 @@ class HVACTemplateManager:
             # Cleanup
             Path(tmp_path).unlink(missing_ok=True)
 
+    def _add_shared_thermostat(self, idf: IDF) -> None:
+        """
+        Add shared thermostat for all zones (loaded once globally).
+
+        Uses HVACTEMPLATE:THERMOSTAT which ExpandObjects will convert
+        to proper thermostat objects.
+        """
+        # Check if thermostat already exists
+        existing = [
+            obj for obj in idf.idfobjects.get('HVACTEMPLATE:THERMOSTAT', [])
+            if obj.Name == "All Zones"
+        ]
+
+        if existing:
+            print("   ℹ️  Shared thermostat already exists, skipping")
+            return
+
+        # Load thermostat template
+        template_path = self.templates_dir / "thermostat_shared.idf"
+
+        if template_path.exists():
+            import tempfile
+            content = template_path.read_text(encoding='utf-8')
+
+            # Merge into IDF
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.idf', delete=False, encoding='utf-8') as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            try:
+                template_idf = IDF(tmp_path)
+                for obj in template_idf.idfobjects['HVACTEMPLATE:THERMOSTAT']:
+                    idf.copyidfobject(obj)
+                print("   ✅ Added shared thermostat for all zones")
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+        else:
+            # Fallback: Create directly
+            idf.newidfobject(
+                "HVACTEMPLATE:THERMOSTAT",
+                Name="All Zones",
+                Heating_Setpoint_Schedule_Name="",
+                Constant_Heating_Setpoint=20.0,
+                Cooling_Setpoint_Schedule_Name="",
+                Constant_Cooling_Setpoint=26.0,
+            )
+            print("   ✅ Created shared thermostat directly")
+
     def _add_ideal_loads_to_zone(self, idf: IDF, zone_name: str) -> None:
         """
         Add ideal loads air system to a specific zone using HVACTEMPLATE.
@@ -346,11 +397,11 @@ class HVACTemplateManager:
         # Load template with zone name
         template_content = self._load_template_with_zone(template_path, zone_name)
 
-        # Merge HVACTEMPLATE objects
+        # Merge HVACTEMPLATE objects (only ZONE, not THERMOSTAT - that's loaded globally)
         self._merge_template_objects(
             idf,
             template_content,
-            ["HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM", "HVACTEMPLATE:THERMOSTAT"]
+            ["HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM"]
         )
 
         print(f"   ✅ Added ideal loads HVAC to zone '{zone_name}' (via HVACTEMPLATE)")
@@ -363,11 +414,11 @@ class HVACTemplateManager:
             idf: IDF object
             zone_name: Name of the zone
         """
-        # HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM
+        # HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM (reference shared thermostat)
         idf.newidfobject(
             "HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM",
             Zone_Name=zone_name,
-            Template_Thermostat_Name="",
+            Template_Thermostat_Name="All Zones",  # Reference shared thermostat
             System_Availability_Schedule_Name="",
             Maximum_Heating_Supply_Air_Temperature=50.0,
             Minimum_Cooling_Supply_Air_Temperature=13.0,
@@ -384,16 +435,6 @@ class HVACTemplateManager:
             Dehumidification_Control_Type="ConstantSupplyHumidityRatio",
             Cooling_Sensible_Heat_Ratio="",
             Humidification_Control_Type="ConstantSupplyHumidityRatio",
-        )
-
-        # HVACTEMPLATE:THERMOSTAT
-        idf.newidfobject(
-            "HVACTEMPLATE:THERMOSTAT",
-            Name=f"{zone_name}_Thermostat",
-            Heating_Setpoint_Schedule_Name="",
-            Constant_Heating_Setpoint=21.0,
-            Cooling_Setpoint_Schedule_Name="",
-            Constant_Cooling_Setpoint=24.0,
         )
 
         print(f"   ✅ Added HVACTEMPLATE objects directly for zone '{zone_name}'")

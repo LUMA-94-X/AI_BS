@@ -4,7 +4,7 @@
 
 HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM,
     ZONE_NAME,                           !- Zone Name
-    ,                                     !- Template Thermostat Name (blank = auto)
+    All Zones,                            !- Template Thermostat Name (shared thermostat)
     ,                                     !- System Availability Schedule Name (blank = always on)
     50.0,                                 !- Maximum Heating Supply Air Temperature {C}
     13.0,                                 !- Minimum Cooling Supply Air Temperature {C}
@@ -20,20 +20,4 @@ HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM,
     ,                                     !- Cooling Availability Schedule Name (blank = always on)
     ConstantSupplyHumidityRatio,          !- Dehumidification Control Type
     ,                                     !- Cooling Sensible Heat Ratio {dimensionless}
-    ConstantSupplyHumidityRatio,          !- Humidification Control Type
-    ,                                     !- Design Specification Outdoor Air Object Name
-    ,                                     !- Outdoor Air Inlet Node Name
-    ,                                     !- Demand Controlled Ventilation Type
-    ,                                     !- Outdoor Air Economizer Type
-    ,                                     !- Heat Recovery Type
-    ,                                     !- Sensible Heat Recovery Effectiveness {dimensionless}
-    ;                                     !- Latent Heat Recovery Effectiveness {dimensionless}
-
-!- HVACTEMPLATE:THERMOSTAT for zones
-!- This creates consistent heating/cooling setpoints
-HVACTEMPLATE:THERMOSTAT,
-    ZONE_NAME_Thermostat,                !- Name
-    ,                                     !- Heating Setpoint Schedule Name (blank = constant 21°C)
-    21.0,                                 !- Constant Heating Setpoint {C}
-    ,                                     !- Cooling Setpoint Schedule Name (blank = constant 24°C)
-    24.0;                                 !- Constant Cooling Setpoint {C}
+    ConstantSupplyHumidityRatio;          !- Humidification Control Type

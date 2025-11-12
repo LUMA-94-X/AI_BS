@@ -1,0 +1,9 @@
+!- Shared Thermostat Template for all zones
+!- Load this ONCE globally, not per zone
+
+HVACTEMPLATE:THERMOSTAT,
+    All Zones,                           !- Name
+    ,                                     !- Heating Setpoint Schedule Name (blank = constant)
+    20.0,                                 !- Constant Heating Setpoint {C}
+    ,                                     !- Cooling Setpoint Schedule Name (blank = constant)
+    26.0;                                 !- Constant Cooling Setpoint {C}
