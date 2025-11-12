@@ -96,7 +96,8 @@ class FiveZoneGenerator:
 
         # 9. Schedules & Internal Loads
         self._add_schedules(idf)
-        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
+        # TODO: Internal loads disabled due to PEOPLE crash (see ISSUE_PEOPLE_CRASH.md)
+        # self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
 
         # 10. Infiltration
         if ea_data.effective_infiltration > 0:
@@ -110,9 +111,213 @@ class FiveZoneGenerator:
 
         # 12. Speichern falls Pfad angegeben
         if output_path:
+            # CRITICAL: Sammle Boundary Objects VOR dem Save (eppy korrumpiert im Save!)
+            boundary_map = self._collect_boundary_map(idf)
             idf.save(str(output_path))
+            # Fix eppy bug that overwrites Outside_Boundary_Condition_Object
+            self._fix_eppy_boundary_objects(boundary_map, output_path)
 
         return idf
+
+    def create_from_explicit_dimensions(
+        self,
+        building_length: float,
+        building_width: float,
+        floor_height: float,
+        num_floors: int,
+        ea_data: EnergieausweisInput,
+        output_path: Optional[Path] = None
+    ) -> IDF:
+        """
+        Erstellt 5-Zonen-IDF mit expliziten Dimensionen (umgeht GeometrySolver).
+
+        Diese Methode ist nützlich für Tests oder wenn die Gebäudedimensionen
+        bereits bekannt sind und nicht aus Energieausweis-Daten berechnet werden sollen.
+
+        Args:
+            building_length: Gebäudelänge in Metern
+            building_width: Gebäudebreite in Metern
+            floor_height: Geschosshöhe in Metern
+            num_floors: Anzahl Geschosse
+            ea_data: Energieausweis-Daten (für U-Werte, WWR, etc.)
+            output_path: Pfad zum Speichern des IDF (optional)
+
+        Returns:
+            IDF-Objekt
+        """
+        # Create GeometrySolution manually (bypass solver)
+        from features.geometrie.utils.geometry_solver import SolutionMethod
+        geo_solution = GeometrySolution(
+            length=building_length,
+            width=building_width,
+            height=floor_height * num_floors,
+            num_floors=num_floors,
+            confidence=1.0,  # Explicit dimensions = highest confidence
+            method=SolutionMethod.EXACT,
+            warnings=[]
+        )
+
+        # 2. Multi-Floor Zonen-Layouts erstellen
+        wwr_avg = ea_data.fenster.window_wall_ratio or 0.3
+        layouts = self.perimeter_calc.create_multi_floor_layout(
+            building_length=building_length,
+            building_width=building_width,
+            floor_height=floor_height,
+            num_floors=num_floors,
+            wwr=wwr_avg
+        )
+
+        # 3. Fensterverteilung berechnen
+        wall_areas = self.fenster_dist.estimate_wall_areas_from_geometry(
+            building_length=building_length,
+            building_width=building_width,
+            building_height=floor_height * num_floors
+        )
+
+        orientation_wwr = self.fenster_dist.calculate_orientation_wwr(
+            fenster_data=ea_data.fenster,
+            wall_areas=wall_areas,
+            gebaeudetyp=ea_data.gebaeudetyp
+        )
+
+        # 4. IDF erstellen
+        idf = self._initialize_idf()
+
+        # 5. Materialien & Konstruktionen (mit U-Werten)
+        self._add_constructions_from_u_values(idf, ea_data)
+
+        # 6. Simulation Control & Settings
+        self._add_simulation_settings(idf, geo_solution)
+
+        # 7. Zonen erstellen
+        self._add_zones(idf, layouts)
+
+        # 8. Surfaces erstellen
+        self._add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
+
+        # 9. Schedules & Internal Loads
+        self._add_schedules(idf)
+        # TODO: Internal loads disabled due to PEOPLE crash (see ISSUE_PEOPLE_CRASH.md)
+        # self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
+
+        # 10. Infiltration
+        if ea_data.effective_infiltration > 0:
+            self._add_infiltration(idf, layouts, ea_data.effective_infiltration)
+
+        # 10.5 HVAC System (IdealLoads)
+        self._add_hvac_system(idf)
+
+        # 11. Output Variables
+        self._add_output_variables(idf)
+
+        # 12. Speichern falls Pfad angegeben
+        if output_path:
+            # CRITICAL: Sammle Boundary Objects VOR dem Save (eppy korrumpiert im Save!)
+            boundary_map = self._collect_boundary_map(idf)
+            idf.save(str(output_path))
+            # Fix eppy bug that overwrites Outside_Boundary_Condition_Object
+            self._fix_eppy_boundary_objects(boundary_map, output_path)
+
+        return idf
+
+    def _collect_boundary_map(self, idf: IDF) -> dict:
+        """
+        Sammelt Boundary Objects VOR dem eppy Save (da save diese korrupt!).
+
+        Returns:
+            dict: {surface_name: correct_boundary_object_name}
+        """
+        boundary_map = {}
+        for surf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]:
+            if surf.Outside_Boundary_Condition == "Surface":
+                boundary_map[surf.Name] = surf.Outside_Boundary_Condition_Object
+                # DEBUG
+                if "Perimeter_North_F1_Wall_To_Core" in surf.Name or "Core_F1_Wall_To_North" in surf.Name:
+                    print(f"  DEBUG boundary_map: {surf.Name} → {surf.Outside_Boundary_Condition_Object}")
+        return boundary_map
+
+    def _fix_eppy_boundary_objects(self, boundary_map: dict, output_path: Path) -> None:
+        """
+        WORKAROUND für eppy Bug: Outside_Boundary_Condition_Object wird beim Save überschrieben.
+
+        Eppy setzt fälschlicherweise Outside_Boundary_Condition_Object = Name (Self-Reference).
+        Diese Methode korrigiert das IDF-File nach dem Save.
+
+        Args:
+            boundary_map: Pre-collected boundary objects BEFORE save
+            output_path: Path to the saved IDF file
+        """
+        # 1. Lese gespeicherte IDF-Datei
+        with open(output_path, 'r') as f:
+            idf_content = f.read()
+
+        # 2. Korrigiere jede falsche Self-Reference mit den vorher gesammelten Werten
+        # WICHTIG: Wir müssen jeden Surface-Block einzeln finden und NUR dessen Boundary-Zeile ersetzen!
+        # Nicht nach dem Boundary-Wert suchen (das führt zu Interferenzen zwischen Paaren)!
+        corrections = 0
+        import re
+
+        for surf_name, correct_boundary in boundary_map.items():
+            # Pattern: Finde den BUILDINGSURFACE:DETAILED Block für diese spezifische Surface
+            # und ersetze NUR die Boundary Object Zeile IN DIESEM Block
+            # Format:
+            # BUILDINGSURFACE:DETAILED,
+            #     SurfaceName,    !- Name
+            #     Wall,           !- Surface Type
+            #     ...
+            #     Surface,        !- Outside Boundary Condition
+            #     <WRONG_VALUE>,  !- Outside Boundary Condition Object  <- DIESE Zeile ersetzen!
+
+            pattern = (
+                rf'(BUILDINGSURFACE:DETAILED,\s+'  # Start of block
+                rf'{re.escape(surf_name)},\s+!- Name\s+'  # This surface's name
+                rf'.*?'  # Any lines in between (non-greedy)
+                rf'Surface,\s+!- Outside Boundary Condition\s+'  # The "Surface" boundary condition
+                rf')(\S+)(,\s+!- Outside Boundary Condition Object)'  # Capture old value
+            )
+
+            # Replacement: Keep everything before, replace value, keep comment
+            replacement = rf'\1{correct_boundary}\3'
+
+            new_content, count = re.subn(pattern, replacement, idf_content, flags=re.DOTALL)
+            if count > 0:
+                idf_content = new_content
+                corrections += count
+                # DEBUG
+                print(f"  DEBUG fixed: {surf_name[:40]:40} → {correct_boundary[:40]:40} (blocks={count})")
+
+        # 3. Schreibe korrigiertes IDF zurück
+        if corrections > 0:
+            print(f"  DEBUG: Writing corrected IDF to {output_path}")
+            print(f"  DEBUG: File size before: {output_path.stat().st_size if output_path.exists() else 0} bytes")
+            with open(output_path, 'w') as f:
+                f.write(idf_content)
+            print(f"  DEBUG: File size after: {output_path.stat().st_size} bytes")
+
+            # DEBUG: Verify the fix was actually written
+            with open(output_path, 'r') as f:
+                verify_content = f.read()
+                # Simple string search for specific corrected values
+                if "Core_F1_Wall_To_North," in verify_content:
+                    print(f"  ✅ VERIFY: Found 'Core_F1_Wall_To_North' in file")
+                else:
+                    print(f"  ❌ VERIFY: 'Core_F1_Wall_To_North' NOT found in file!")
+
+                # Check what's actually on the Outside Boundary Condition Object lines
+                import re
+                # Find lines specifically after "Surface," (Outside Boundary Condition)
+                blocks = re.findall(
+                    r'(^\s+\S+,\s+!- Name\n(?:.*\n){5}^\s+Surface,\s+!- Outside Boundary Condition\n^\s+(\S+),\s+!- Outside Boundary Condition Object)',
+                    verify_content,
+                    flags=re.MULTILINE
+                )
+                print(f"  DEBUG VERIFY: Found {len(blocks)} surface-type blocks")
+                for i, (block, boundary) in enumerate(blocks[:3]):
+                    print(f"    Block {i+1} boundary: {boundary}")
+
+            print(f"  🔧 Fixed {corrections} eppy boundary object bugs")
+        else:
+            print(f"  No eppy boundary object bugs found (this is unexpected!)")
 
     # ========================================================================
     # IDF INITIALIZATION
@@ -450,12 +655,7 @@ class FiveZoneGenerator:
                 boundary_object = zone_geom.name.replace(f"_F{floor_num+1}", f"_F{floor_num}") + "_Ceiling"
                 construction = "CeilingConstruction"
 
-            # CRITICAL: Floor normal must point DOWN
-            # Ground floor: [3, 2, 1, 0] = reversed order so normal points down
-            # Inter-zone floor: ALSO [3, 2, 1, 0] initially, then we match to ceiling below
-            #
-            # For inter-zone: After ceiling is created with [0,1,2,3],
-            # floor above uses [3,2,1,0] which is the EXACT REVERSE
+            # CRITICAL: Floor vertices must be REVERSED [3,2,1,0] for downward normal
             idf.newidfobject(
                 "BUILDINGSURFACE:DETAILED",
                 Name=f"{zone_geom.name}_Floor",
@@ -514,8 +714,7 @@ class FiveZoneGenerator:
                 sun_exposure = "NoSun"
                 wind_exposure = "NoWind"
 
-            # CRITICAL: Ceiling/Roof normal must point UP (viewed from above = counterclockwise)
-            # Use vertices in order [0, 1, 2, 3] to get correct normal direction
+            # CRITICAL: Ceiling/Roof normal must point UP [0,1,2,3] for upward normal
             idf.newidfobject(
                 "BUILDINGSURFACE:DETAILED",
                 Name=f"{zone_geom.name}_Ceiling",
@@ -528,7 +727,7 @@ class FiveZoneGenerator:
                 Wind_Exposure=wind_exposure,
                 View_Factor_to_Ground="autocalculate",
                 Number_of_Vertices=4,
-                # Counterclockwise from above (ceiling normal points UP)
+                # Ceiling vertices: NORMAL [0,1,2,3] so normal points UP
                 Vertex_1_Xcoordinate=vertices_2d[0][0],
                 Vertex_1_Ycoordinate=vertices_2d[0][1],
                 Vertex_1_Zcoordinate=z_top,
@@ -562,30 +761,32 @@ class FiveZoneGenerator:
         W = geo_solution.width
 
         # North Perimeter - Außenwand an Y=W (Nordseite)
+        # FIXED: Counter-clockwise vertex order (was clockwise!)
         self._add_exterior_wall(
             idf,
             zone_name=layout.perimeter_north.name,
             wall_name=f"{layout.perimeter_north.name}_Wall_North",
             vertices=[
-                (0, W, z_base),
-                (0, W, z_top),
-                (L, W, z_top),
-                (L, W, z_base),
+                (0, W, z_base),    # V1: Bottom-Left
+                (L, W, z_base),    # V2: Bottom-Right (counter-clockwise!)
+                (L, W, z_top),     # V3: Top-Right
+                (0, W, z_top),     # V4: Top-Left
             ],
             orientation=Orientation.NORTH,
             wwr=orientation_wwr.north
         )
 
         # South Perimeter - Außenwand an Y=0 (Südseite)
+        # FIXED: Counter-clockwise vertex order
         self._add_exterior_wall(
             idf,
             zone_name=layout.perimeter_south.name,
             wall_name=f"{layout.perimeter_south.name}_Wall_South",
             vertices=[
-                (L, 0, z_base),
-                (L, 0, z_top),
-                (0, 0, z_top),
-                (0, 0, z_base),
+                (L, 0, z_base),    # V1: Bottom-Right (from inside view)
+                (0, 0, z_base),    # V2: Bottom-Left (counter-clockwise!)
+                (0, 0, z_top),     # V3: Top-Left
+                (L, 0, z_top),     # V4: Top-Right
             ],
             orientation=Orientation.SOUTH,
             wwr=orientation_wwr.south
@@ -593,31 +794,33 @@ class FiveZoneGenerator:
 
         # East Perimeter - Außenwand an X=L (Ostseite)
         # Nur der Teil, der nicht von Nord/Süd-Perimeter bedeckt ist
+        # FIXED: Counter-clockwise vertex order
         p = layout.perimeter_north.width  # Perimeter depth
         self._add_exterior_wall(
             idf,
             zone_name=layout.perimeter_east.name,
             wall_name=f"{layout.perimeter_east.name}_Wall_East",
             vertices=[
-                (L, p, z_base),
-                (L, p, z_top),
-                (L, W-p, z_top),
-                (L, W-p, z_base),
+                (L, p, z_base),      # V1: Bottom (South end)
+                (L, W-p, z_base),    # V2: Bottom (North end) - counter-clockwise!
+                (L, W-p, z_top),     # V3: Top (North end)
+                (L, p, z_top),       # V4: Top (South end)
             ],
             orientation=Orientation.EAST,
             wwr=orientation_wwr.east
         )
 
         # West Perimeter - Außenwand an X=0 (Westseite)
+        # FIXED: Counter-clockwise vertex order
         self._add_exterior_wall(
             idf,
             zone_name=layout.perimeter_west.name,
             wall_name=f"{layout.perimeter_west.name}_Wall_West",
             vertices=[
-                (0, W-p, z_base),
-                (0, W-p, z_top),
-                (0, p, z_top),
-                (0, p, z_base),
+                (0, W-p, z_base),    # V1: Bottom (North end)
+                (0, p, z_base),      # V2: Bottom (South end) - counter-clockwise!
+                (0, p, z_top),       # V3: Top (South end)
+                (0, W-p, z_top),     # V4: Top (North end)
             ],
             orientation=Orientation.WEST,
             wwr=orientation_wwr.west
@@ -682,12 +885,15 @@ class FiveZoneGenerator:
         v1 = wall_vertices[0]
         v2 = wall_vertices[1]
         v3 = wall_vertices[2]
+        v4 = wall_vertices[3]
 
         # Wall width (horizontal)
-        wall_width = ((v1[0] - v3[0])**2 + (v1[1] - v3[1])**2)**0.5
+        wall_width = ((v1[0] - v2[0])**2 + (v1[1] - v2[1])**2)**0.5
 
         # Wall height (vertical)
-        wall_height = abs(v2[2] - v1[2])
+        # FIXED: For counter-clockwise walls, v1 and v2 are at same Z (bottom)
+        # Height is from v1 (bottom) to v4 (top), NOT v1 to v2!
+        wall_height = abs(v4[2] - v1[2])
 
         # Window dimensions (maintaining aspect ratio)
         # sqrt(wwr) approach for proportional scaling
@@ -712,8 +918,9 @@ class FiveZoneGenerator:
 
         # Direction vectors
         # Horizontal direction (along wall)
-        h_dir_x = (v3[0] - v1[0]) / wall_width if wall_width > 0 else 0
-        h_dir_y = (v3[1] - v1[1]) / wall_width if wall_width > 0 else 0
+        # FIXED: For counter-clockwise, horizontal is from v1 (bottom-left) to v2 (bottom-right)
+        h_dir_x = (v2[0] - v1[0]) / wall_width if wall_width > 0 else 0
+        h_dir_y = (v2[1] - v1[1]) / wall_width if wall_width > 0 else 0
 
         # Window corners
         window_vertices = [
@@ -947,7 +1154,7 @@ class FiveZoneGenerator:
             "BUILDINGSURFACE:DETAILED",
             Name=wall_a_name,
             Surface_Type="Wall",
-            Construction_Name="CeilingConstruction",  # Interior wall
+            Construction_Name="WallConstruction",  # Interior wall - FIXED: was CeilingConstruction
             Zone_Name=zone_a,
             Outside_Boundary_Condition="Surface",
             Outside_Boundary_Condition_Object=wall_b_name,
@@ -976,7 +1183,7 @@ class FiveZoneGenerator:
             "BUILDINGSURFACE:DETAILED",
             Name=wall_b_name,
             Surface_Type="Wall",
-            Construction_Name="CeilingConstruction",
+            Construction_Name="WallConstruction",  # FIXED: was CeilingConstruction
             Zone_Name=zone_b,
             Outside_Boundary_Condition="Surface",
             Outside_Boundary_Condition_Object=wall_a_name,
@@ -1005,61 +1212,37 @@ class FiveZoneGenerator:
     def _add_schedules(self, idf: IDF) -> None:
         """Fügt Standard-Schedules hinzu."""
 
-        # Always On
-        idf.newidfobject(
-            "SCHEDULE:CONSTANT",
-            Name="AlwaysOn",
-            Schedule_Type_Limits_Name="",
-            Hourly_Value=1.0,
-        )
+        # Note: ScheduleTypeLimits and Schedules are created by ideal_loads HVAC system
+        # (Temperature, Control Type, HeatingSetpoint, CoolingSetpoint, AlwaysOn)
 
-        # Occupancy (Werktags 8-18 Uhr)
-        idf.newidfobject(
-            "SCHEDULE:COMPACT",
-            Name="OccupancySchedule",
-            Schedule_Type_Limits_Name="",
-            Field_1="Through: 12/31",
-            Field_2="For: Weekdays",
-            Field_3="Until: 8:00",
-            Field_4="0.0",
-            Field_5="Until: 18:00",
-            Field_6="1.0",
-            Field_7="Until: 24:00",
-            Field_8="0.0",
-            Field_9="For: Weekend Holidays",
-            Field_10="Until: 24:00",
-            Field_11="0.0",
-        )
+        # Occupancy (Werktags 8-18 Uhr) - Disabled (see ISSUE_PEOPLE_CRASH.md)
+        # idf.newidfobject(
+        #     "SCHEDULE:COMPACT",
+        #     Name="OccupancySchedule",
+        #     Schedule_Type_Limits_Name="Fraction",
+        #     Field_1="Through: 12/31",
+        #     Field_2="For: Weekdays",
+        #     Field_3="Until: 8:00",
+        #     Field_4="0.0",
+        #     Field_5="Until: 18:00",
+        #     Field_6="1.0",
+        #     Field_7="Until: 24:00",
+        #     Field_8="0.0",
+        #     Field_9="For: Weekend Holidays",
+        #     Field_10="Until: 24:00",
+        #     Field_11="0.0",
+        # )
 
-        # Activity Level (120 W/Person)
-        idf.newidfobject(
-            "SCHEDULE:CONSTANT",
-            Name="ActivityLevel",
-            Schedule_Type_Limits_Name="",
-            Hourly_Value=120.0,
-        )
+        # Activity Level (120 W/Person) - Disabled (see ISSUE_PEOPLE_CRASH.md)
+        # idf.newidfobject(
+        #     "SCHEDULE:CONSTANT",
+        #     Name="ActivityLevel",
+        #     Schedule_Type_Limits_Name="ActivityLevel",
+        #     Hourly_Value=120.0,
+        # )
 
-        # Thermostat Schedules
-        idf.newidfobject(
-            "SCHEDULE:CONSTANT",
-            Name="HeatingSetpoint",
-            Schedule_Type_Limits_Name="",
-            Hourly_Value=20.0,
-        )
-
-        idf.newidfobject(
-            "SCHEDULE:CONSTANT",
-            Name="CoolingSetpoint",
-            Schedule_Type_Limits_Name="",
-            Hourly_Value=24.0,
-        )
-
-        idf.newidfobject(
-            "SCHEDULE:CONSTANT",
-            Name="ThermostatControlType",
-            Schedule_Type_Limits_Name="",
-            Hourly_Value=4,  # 4 = DualSetpoint
-        )
+        # Thermostat Schedules - Not needed, ideal_loads creates them
+        # (HeatingSetpoint, CoolingSetpoint, AlwaysOn with correct types)
 
     def _add_internal_loads(
         self,
@@ -1079,7 +1262,7 @@ class FiveZoneGenerator:
                 zone_name = zone_geom.name
 
                 # People
-                idf.newidfobject(
+                people_obj = idf.newidfobject(
                     "PEOPLE",
                     Name=f"{zone_name}_People",
                     Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
@@ -1089,8 +1272,17 @@ class FiveZoneGenerator:
                     People_per_Floor_Area=people_per_m2,
                     Floor_Area_per_Person="",
                     Fraction_Radiant=0.3,
-                    Sensible_Heat_Fraction="autocalculate",
+                    Sensible_Heat_Fraction=0.7,  # 70% sensible, 30% latent (typical for office)
                     Activity_Level_Schedule_Name="ActivityLevel",
+                    Carbon_Dioxide_Generation_Rate=3.82e-08,
+                    Enable_ASHRAE_55_Comfort_Warnings="No",
+                    Mean_Radiant_Temperature_Calculation_Type="",  # Empty = ZoneAveraged (default)
+                    Surface_NameAngle_Factor_List_Name="",
+                    Work_Efficiency_Schedule_Name="",
+                    Clothing_Insulation_Calculation_Method="DynamicClothingModelASHRAE55",  # Doesn't need schedule!
+                    Clothing_Insulation_Calculation_Method_Schedule_Name="",
+                    Clothing_Insulation_Schedule_Name="",
+                    Air_Velocity_Schedule_Name="",
                 )
 
                 # Lights
@@ -1173,14 +1365,17 @@ class FiveZoneGenerator:
     # ========================================================================
 
     def _add_output_variables(self, idf: IDF) -> None:
-        """Fügt Output Variables hinzu."""
+        """Fügt Output Variables hinzu - für IdealLoads HVAC System."""
 
+        # Output-Variablen für IdealLoads HVAC
         outputs = [
             ("Zone Mean Air Temperature", "Hourly"),
-            ("Zone Total Internal Latent Gain Rate", "Hourly"),
-            ("Zone Total Internal Total Heating Rate", "Hourly"),
-            ("Heating:DistrictHeating", "Hourly"),
-            ("Cooling:DistrictCooling", "Hourly"),
+            ("Zone Air System Sensible Heating Energy", "Hourly"),
+            ("Zone Air System Sensible Cooling Energy", "Hourly"),
+            ("Zone Ideal Loads Zone Total Heating Energy", "Hourly"),
+            ("Zone Ideal Loads Zone Total Cooling Energy", "Hourly"),
+            ("Zone Ideal Loads Supply Air Total Heating Energy", "Hourly"),
+            ("Zone Ideal Loads Supply Air Total Cooling Energy", "Hourly"),
         ]
 
         for var_name, freq in outputs:
@@ -1191,8 +1386,14 @@ class FiveZoneGenerator:
                 Reporting_Frequency=freq,
             )
 
-        # Output:SQLite
+        # Output:SQLite für Ergebnis-Analyse
         idf.newidfobject(
             "OUTPUT:SQLITE",
             Option_Type="SimpleAndTabular",
+        )
+
+        # Output:Table:SummaryReports für Zusammenfassung
+        idf.newidfobject(
+            "OUTPUT:TABLE:SUMMARYREPORTS",
+            Report_1_Name="AllSummary",
         )

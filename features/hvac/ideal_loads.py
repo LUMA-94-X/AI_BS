@@ -338,17 +338,24 @@ class HVACTemplateManager:
             Zone_Return_Air_Node_or_NodeList_Name=f"{zone_name}_Return_Node",
         )
 
-        # CRITICAL: Add ZoneControl:Thermostat
+        # CRITICAL: Add ZoneControl:Thermostat (if not exists)
         # IdealLoads HVAC requires thermostats to control heating/cooling
         # Without this, EnergyPlus will crash during initialization!
-        idf.newidfobject(
-            "ZONECONTROL:THERMOSTAT",
-            Name=f"{zone_name}_Thermostat",
-            Zone_or_ZoneList_Name=zone_name,
-            Control_Type_Schedule_Name="AlwaysOn",  # Schedule that = 4 (Dual Setpoint)
-            Control_1_Object_Type="ThermostatSetpoint:DualSetpoint",
-            Control_1_Name="DualSetPoint",  # Shared setpoint for all zones
-        )
+        thermostat_name = f"{zone_name}_Thermostat"
+        existing_thermostat = [
+            obj for obj in idf.idfobjects.get('ZONECONTROL:THERMOSTAT', [])
+            if obj.Name == thermostat_name
+        ]
+
+        if not existing_thermostat:
+            idf.newidfobject(
+                "ZONECONTROL:THERMOSTAT",
+                Name=thermostat_name,
+                Zone_or_ZoneList_Name=zone_name,
+                Control_Type_Schedule_Name="AlwaysOn",  # Schedule that = 4 (Dual Setpoint)
+                Control_1_Object_Type="ThermostatSetpoint:DualSetpoint",
+                Control_1_Name="DualSetPoint",  # Shared setpoint for all zones
+            )
 
         print(f"   ✅ Added ideal loads HVAC to zone '{zone_name}'")
 
