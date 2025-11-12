@@ -29,6 +29,16 @@ def main():
 
     print(f"📂 Loading IDF from: {idf_path}")
 
+    # Set IDD file for eppy (required!)
+    idd_path = Path("C:/EnergyPlusV25-1-0/Energy+.idd")
+    if not idd_path.exists():
+        print(f"❌ IDD file not found: {idd_path}")
+        print("   Please check EnergyPlus installation!")
+        return
+
+    IDF.setiddname(str(idd_path))
+    print(f"✅ IDD file set: {idd_path}")
+
     # Load IDF
     idf = IDF(str(idf_path))
 
