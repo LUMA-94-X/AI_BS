@@ -7,7 +7,13 @@ This script tests the new NativeInternalLoadsManager by:
 4. User can then run simulation to verify it works
 """
 
+import sys
 from pathlib import Path
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 from eppy.modeleditor import IDF
 from features.internal_loads.native_loads import NativeInternalLoadsManager
 
