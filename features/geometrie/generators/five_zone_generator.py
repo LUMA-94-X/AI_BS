@@ -20,6 +20,7 @@ from features.geometrie.utils.fenster_distribution import (
     OrientationWWR,
     Orientation
 )
+from features.internal_loads.native_loads import NativeInternalLoadsManager
 
 
 class FiveZoneGenerator:
@@ -95,9 +96,8 @@ class FiveZoneGenerator:
         self._add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
 
         # 9. Schedules & Internal Loads
-        self._add_schedules(idf)
-        # TODO: Internal loads disabled due to PEOPLE crash (see ISSUE_PEOPLE_CRASH.md)
-        # self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
+        schedules = self._add_schedules(idf, building_type=ea_data.gebaeudetyp)
+        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp, schedules)
 
         # 10. Infiltration
         if ea_data.effective_infiltration > 0:
@@ -196,9 +196,8 @@ class FiveZoneGenerator:
         self._add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
 
         # 9. Schedules & Internal Loads
-        self._add_schedules(idf)
-        # TODO: Internal loads disabled due to PEOPLE crash (see ISSUE_PEOPLE_CRASH.md)
-        # self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp)
+        schedules = self._add_schedules(idf, building_type=ea_data.gebaeudetyp)
+        self._add_internal_loads(idf, layouts, ea_data.gebaeudetyp, schedules)
 
         # 10. Infiltration
         if ea_data.effective_infiltration > 0:
@@ -1209,112 +1208,81 @@ class FiveZoneGenerator:
     # SCHEDULES & INTERNAL LOADS
     # ========================================================================
 
-    def _add_schedules(self, idf: IDF) -> None:
-        """Fügt Standard-Schedules hinzu."""
+    def _add_schedules(self, idf: IDF, building_type: str = "office") -> Dict[str, str]:
+        """Fügt Standard-Schedules hinzu via NativeInternalLoadsManager.
 
-        # Note: ScheduleTypeLimits and Schedules are created by ideal_loads HVAC system
-        # (Temperature, Control Type, HeatingSetpoint, CoolingSetpoint, AlwaysOn)
+        Args:
+            idf: IDF object
+            building_type: Building type (office, residential)
 
-        # Occupancy (Werktags 8-18 Uhr) - Disabled (see ISSUE_PEOPLE_CRASH.md)
-        # idf.newidfobject(
-        #     "SCHEDULE:COMPACT",
-        #     Name="OccupancySchedule",
-        #     Schedule_Type_Limits_Name="Fraction",
-        #     Field_1="Through: 12/31",
-        #     Field_2="For: Weekdays",
-        #     Field_3="Until: 8:00",
-        #     Field_4="0.0",
-        #     Field_5="Until: 18:00",
-        #     Field_6="1.0",
-        #     Field_7="Until: 24:00",
-        #     Field_8="0.0",
-        #     Field_9="For: Weekend Holidays",
-        #     Field_10="Until: 24:00",
-        #     Field_11="0.0",
-        # )
+        Returns:
+            Dict mapping schedule type to schedule name
+        """
+        # Use proven native approach for schedules
+        manager = NativeInternalLoadsManager()
+        schedules = manager.add_schedules(idf, building_type)
 
-        # Activity Level (120 W/Person) - Disabled (see ISSUE_PEOPLE_CRASH.md)
-        # idf.newidfobject(
-        #     "SCHEDULE:CONSTANT",
-        #     Name="ActivityLevel",
-        #     Schedule_Type_Limits_Name="ActivityLevel",
-        #     Hourly_Value=120.0,
-        # )
+        # Add legacy schedule names for backward compatibility
+        # Map new schedule names to old expected names
+        # OccupancySchedule -> Always_On_Occupancy
+        # ActivityLevel -> Activity_Level_Schedule
 
-        # Thermostat Schedules - Not needed, ideal_loads creates them
-        # (HeatingSetpoint, CoolingSetpoint, AlwaysOn with correct types)
+        return schedules
 
     def _add_internal_loads(
         self,
         idf: IDF,
         layouts: Dict[int, ZoneLayout],
-        gebaeudetyp
+        gebaeudetyp: str,
+        schedules: Dict[str, str]
     ) -> None:
-        """Fügt Internal Loads (People, Lights, Equipment) hinzu."""
+        """Fügt Internal Loads (People, Lights, Equipment) hinzu.
 
-        # Standard-Werte (können später nach Gebäudetyp differenziert werden)
-        people_per_m2 = 0.05  # Personen pro m²
-        lights_w_per_m2 = 10.0  # W/m²
-        equipment_w_per_m2 = 5.0  # W/m²
+        Uses NativeInternalLoadsManager for proven, stable implementation.
+
+        Args:
+            idf: IDF object
+            layouts: Zone layouts per floor
+            gebaeudetyp: Building type (Wohngebäude, Nichtwohngebäude)
+            schedules: Schedule names dict from _add_schedules()
+        """
+        # Map Energieausweis types to internal types
+        building_type_map = {
+            "Wohngebäude": "residential",
+            "Nichtwohngebäude": "office",
+        }
+        building_type = building_type_map.get(gebaeudetyp, "office")
+
+        # Use proven NativeInternalLoadsManager
+        manager = NativeInternalLoadsManager()
+
+        # Collect all zone names and areas
+        zone_names = []
+        zone_areas = {}
 
         for floor_num, layout in layouts.items():
             for orient, zone_geom in layout.all_zones.items():
                 zone_name = zone_geom.name
+                zone_names.append(zone_name)
+                # Calculate zone area from geometry
+                zone_areas[zone_name] = zone_geom.floor_area
 
-                # People
-                people_obj = idf.newidfobject(
-                    "PEOPLE",
-                    Name=f"{zone_name}_People",
-                    Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
-                    Number_of_People_Schedule_Name="OccupancySchedule",
-                    Number_of_People_Calculation_Method="People/Area",
-                    Number_of_People="",
-                    People_per_Floor_Area=people_per_m2,
-                    Floor_Area_per_Person="",
-                    Fraction_Radiant=0.3,
-                    Sensible_Heat_Fraction=0.7,  # 70% sensible, 30% latent (typical for office)
-                    Activity_Level_Schedule_Name="ActivityLevel",
-                    Carbon_Dioxide_Generation_Rate=3.82e-08,
-                    Enable_ASHRAE_55_Comfort_Warnings="No",
-                    Mean_Radiant_Temperature_Calculation_Type="",  # Empty = ZoneAveraged (default)
-                    Surface_NameAngle_Factor_List_Name="",
-                    Work_Efficiency_Schedule_Name="",
-                    Clothing_Insulation_Calculation_Method="DynamicClothingModelASHRAE55",  # Doesn't need schedule!
-                    Clothing_Insulation_Calculation_Method_Schedule_Name="",
-                    Clothing_Insulation_Schedule_Name="",
-                    Air_Velocity_Schedule_Name="",
-                )
+        # Add all internal loads using proven native approach
+        for zone_name in zone_names:
+            area = zone_areas[zone_name]
 
-                # Lights
-                idf.newidfobject(
-                    "LIGHTS",
-                    Name=f"{zone_name}_Lights",
-                    Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
-                    Schedule_Name="OccupancySchedule",
-                    Design_Level_Calculation_Method="Watts/Area",
-                    Lighting_Level="",
-                    Watts_per_Floor_Area=lights_w_per_m2,
-                    Watts_per_Person="",
-                    Return_Air_Fraction=0.0,
-                    Fraction_Radiant=0.4,
-                    Fraction_Visible=0.2,
-                    Fraction_Replaceable=1.0,
-                )
-
-                # Electric Equipment
-                idf.newidfobject(
-                    "ELECTRICEQUIPMENT",
-                    Name=f"{zone_name}_Equipment",
-                    Zone_or_ZoneList_or_Space_or_SpaceList_Name=zone_name,
-                    Schedule_Name="OccupancySchedule",
-                    Design_Level_Calculation_Method="Watts/Area",
-                    Design_Level="",
-                    Watts_per_Floor_Area=equipment_w_per_m2,
-                    Watts_per_Person="",
-                    Fraction_Latent=0.0,
-                    Fraction_Radiant=0.3,
-                    Fraction_Lost=0.0,
-                )
+            manager.add_people_to_zone(
+                idf, zone_name, area, building_type,
+                schedules["occupancy"], schedules["activity"]
+            )
+            manager.add_lights_to_zone(
+                idf, zone_name, area, building_type,
+                schedules["lights"]
+            )
+            manager.add_equipment_to_zone(
+                idf, zone_name, area, building_type,
+                schedules["equipment"]
+            )
 
                 # HINWEIS: HVACTEMPLATE:THERMOSTAT wurde entfernt, weil:
                 # 1. create_building_with_hvac() fügt native ZONEHVAC-Objekte hinzu (kein HVACTemplate)
