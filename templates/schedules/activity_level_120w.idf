@@ -1,0 +1,16 @@
+!-   ===========  ALL OBJECTS IN CLASS: SCHEDULETYPELIMITS ===========
+
+SCHEDULETYPELIMITS,
+    ActivityLevel,           !- Name
+    0.0,                     !- Lower Limit Value
+    ,                        !- Upper Limit Value
+    Continuous;              !- Numeric Type
+
+!-   ===========  ALL OBJECTS IN CLASS: SCHEDULE:COMPACT ===========
+
+SCHEDULE:COMPACT,
+    ActivityLevelSchedule,   !- Name
+    ActivityLevel,           !- Schedule Type Limits Name
+    Through: 12/31,          !- Field 1
+    For: AllDays,            !- Field 2
+    Until: 24:00, 120;       !- Field 3 (120 W/Person - sitzende Tätigkeit)

@@ -1,0 +1,15 @@
+!- Template für ELECTRICEQUIPMENT: Wohngebäude mit 3 W/m²
+!- ZONE_NAME wird beim Laden durch echten Zone-Namen ersetzt
+
+ELECTRICEQUIPMENT,
+    ZONE_NAME_Equipment,                            !- Name
+    ZONE_NAME,                                      !- Zone or ZoneList or Space or SpaceList Name
+    OccupancySchedule_Residential,                  !- Schedule Name
+    Watts/Area,                                     !- Design Level Calculation Method
+    ,                                               !- Design Level {W}
+    3.0,                                            !- Watts per Floor Area {W/m2}
+    ,                                               !- Watts per Person {W/person}
+    0.0,                                            !- Fraction Latent
+    0.5,                                            !- Fraction Radiant
+    0.0,                                            !- Fraction Lost
+    General;                                        !- End-Use Subcategory

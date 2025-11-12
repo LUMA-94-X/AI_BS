@@ -1,0 +1,37 @@
+!- Template für PEOPLE: Wohngebäude mit 0.02 Personen/m²
+!- ZONE_NAME wird beim Laden durch echten Zone-Namen ersetzt
+
+PEOPLE,
+    ZONE_NAME_People,                              !- Name
+    ZONE_NAME,                                      !- Zone or ZoneList or Space or SpaceList Name
+    OccupancySchedule_Residential,                  !- Number of People Schedule Name
+    People/Area,                                    !- Number of People Calculation Method
+    ,                                               !- Number of People
+    0.02,                                           !- People per Floor Area {person/m2}
+    ,                                               !- Floor Area per Person {m2/person}
+    0.3,                                            !- Fraction Radiant
+    ,                                               !- Sensible Heat Fraction
+    ActivityLevelSchedule,                          !- Activity Level Schedule Name
+    3.82e-08,                                       !- Carbon Dioxide Generation Rate {m3/s-W}
+    No,                                             !- Enable ASHRAE 55 Comfort Warnings
+    ZoneAveraged,                                   !- Mean Radiant Temperature Calculation Type
+    ,                                               !- Surface Name/Angle Factor List Name
+    ,                                               !- Work Efficiency Schedule Name
+    ClothingInsulationSchedule_Residential,         !- Clothing Insulation Calculation Method
+    ,                                               !- Clothing Insulation Schedule Name
+    ,                                               !- Air Velocity Schedule Name
+    FANGER;                                         !- Thermal Comfort Model 1 Type
+
+!- Clothing Insulation Schedule
+SCHEDULE:COMPACT,
+    ClothingInsulationSchedule_Residential,         !- Name
+    Any Number,                                     !- Schedule Type Limits Name
+    Through: 4/30,                                  !- Field 1
+    For: AllDays,                                   !- Field 2
+    Until: 24:00, 1.0,                              !- Field 3 (1.0 clo - Winter)
+    Through: 9/30,                                  !- Field 5
+    For: AllDays,                                   !- Field 6
+    Until: 24:00, 0.5,                              !- Field 7 (0.5 clo - Sommer)
+    Through: 12/31,                                 !- Field 9
+    For: AllDays,                                   !- Field 10
+    Until: 24:00, 1.0;                              !- Field 11 (1.0 clo - Winter)
