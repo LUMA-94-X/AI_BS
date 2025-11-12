@@ -112,10 +112,16 @@ def main():
     from features.simulation.runner import EnergyPlusRunner
 
     config = get_config()
-    weather_file = Path("C:/EnergyPlusV25-1-0/WeatherData/DEU_Berlin-Tempelhof.166550_IWEC.epw")
+
+    # Try project weather file first, then EnergyPlus example
+    weather_file = project_root / "data" / "weather" / "example.epw"
+    if not weather_file.exists():
+        weather_file = Path("C:/EnergyPlusV25-1-0/example.epw")
 
     if not weather_file.exists():
-        print(f"❌ Weather file not found: {weather_file}")
+        print(f"❌ Weather file not found!")
+        print(f"   Tried: {project_root / 'data' / 'weather' / 'example.epw'}")
+        print(f"   Tried: C:/EnergyPlusV25-1-0/example.epw")
         return
 
     print(f"   IDF: {output_path.name}")
