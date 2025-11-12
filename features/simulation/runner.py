@@ -101,14 +101,30 @@ class EnergyPlusRunner:
             logger.error(f"Could not copy IDF: {e}")
             return None
 
-        # Also need Energy+.idd in same directory
+        # Also need Energy+.idd in same directory - CRITICAL for ExpandObjects!
         idd_file = self.energyplus_exe.parent / "Energy+.idd"
-        if idd_file.exists():
-            try:
-                shutil.copy(str(idd_file), str(output_dir / "Energy+.idd"))
-                logger.info("Copied Energy+.idd")
-            except Exception as e:
-                logger.warning(f"Could not copy IDD file: {e}")
+        if not idd_file.exists():
+            logger.error(f"Energy+.idd not found at: {idd_file}")
+            return None
+
+        try:
+            # Use resolve() to get absolute paths and handle WSL conversion
+            idd_source = idd_file.resolve()
+            idd_dest = (output_dir / "Energy+.idd").resolve()
+
+            shutil.copy(str(idd_source), str(idd_dest))
+
+            # VERIFY the copy succeeded
+            if not idd_dest.exists():
+                logger.error(f"Failed to copy Energy+.idd to {idd_dest}")
+                return None
+
+            logger.info(f"✅ Copied Energy+.idd ({idd_dest.stat().st_size:,} bytes)")
+
+        except Exception as e:
+            logger.error(f"CRITICAL: Could not copy Energy+.idd: {e}")
+            logger.error("ExpandObjects will fail without IDD file!")
+            return None
 
         try:
             # Run ExpandObjects (it reads in.idf and creates expanded.idf)
