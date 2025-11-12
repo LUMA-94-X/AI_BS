@@ -102,6 +102,9 @@ class FiveZoneGenerator:
         if ea_data.effective_infiltration > 0:
             self._add_infiltration(idf, layouts, ea_data.effective_infiltration)
 
+        # 10.5 HVAC System (IdealLoads)
+        self._add_hvac_system(idf)
+
         # 11. Output Variables
         self._add_output_variables(idf)
 
@@ -1151,6 +1154,19 @@ class FiveZoneGenerator:
                     Velocity_Term_Coefficient=0.0,
                     Velocity_Squared_Term_Coefficient=0.0,
                 )
+
+    # ========================================================================
+    # HVAC SYSTEM
+    # ========================================================================
+
+    def _add_hvac_system(self, idf: IDF) -> None:
+        """Fügt IdealLoads HVAC System zu allen Zonen hinzu."""
+        from features.hvac.ideal_loads import HVACTemplateManager
+
+        manager = HVACTemplateManager()
+        # Apply ideal loads HVAC template to all zones
+        # Note: This modifies the IDF in-place, no need to reassign
+        manager.apply_template_simple(idf, template_name="ideal_loads")
 
     # ========================================================================
     # OUTPUT VARIABLES
