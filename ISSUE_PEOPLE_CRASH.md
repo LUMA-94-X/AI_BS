@@ -1,4 +1,6 @@
-# Issue: Internal Loads (PEOPLE/LIGHTS/EQUIPMENT) verursachen EnergyPlus Silent Crash
+# Issue #5: Internal Loads (PEOPLE/LIGHTS/EQUIPMENT) verursachen EnergyPlus Silent Crash
+
+**GitHub Issue:** https://github.com/LUMA-94-X/AI_BS/issues/5
 
 ## Problem
 Das Hinzufügen von PEOPLE/LIGHTS/ELECTRICEQUIPMENT-Objekten via eppy führt zu einem Silent Crash von EnergyPlus:
