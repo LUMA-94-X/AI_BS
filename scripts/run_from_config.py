@@ -110,9 +110,25 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
     logger.info(f"  Building: {geometry.length}m × {geometry.width}m × {geometry.height}m")
     logger.info(f"  Floor area: {geometry.total_floor_area:.1f} m²")
 
+    # Build sim_settings from YAML config
+    sim_settings = {
+        'timestep': config.simulation.timestep,
+        'start_month': config.simulation.period.start_month,
+        'start_day': config.simulation.period.start_day,
+        'end_month': config.simulation.period.end_month,
+        'end_day': config.simulation.period.end_day,
+        'output_variables': config.simulation.output.output_variables,
+        'reporting_frequency': config.simulation.output.reporting_frequency,
+    }
+
+    logger.info(f"  Simulation settings:")
+    logger.info(f"    Timestep: {sim_settings['timestep']}/hour ({60/sim_settings['timestep']:.1f} min)")
+    logger.info(f"    Period: {sim_settings['start_month']}/{sim_settings['start_day']} - {sim_settings['end_month']}/{sim_settings['end_day']}")
+    logger.info(f"    Output frequency: {sim_settings['reporting_frequency']}")
+
     # Generate IDF (don't save yet - we'll add HVAC first!)
     generator = SimpleBoxGenerator()
-    idf = generator.create_model(geometry, idf_path=None)  # Don't save yet!
+    idf = generator.create_model(geometry, idf_path=None, sim_settings=sim_settings)
 
     logger.info(f"  ✓ IDF created (in memory)")
 
@@ -121,13 +137,17 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
         logger.info("Adding HVAC system (Ideal Loads)...")
         hvac_params = config.hvac.ideal_loads
 
-        # Note: create_building_with_hvac currently uses hardcoded params
-        # In future, pass hvac_params to customize setpoints
-        idf = create_building_with_hvac(idf, "ideal_loads")
+        # Pass user-defined setpoints from YAML config
+        idf = create_building_with_hvac(
+            idf,
+            "ideal_loads",
+            heating_setpoint=hvac_params.heating_setpoint,
+            cooling_setpoint=hvac_params.cooling_setpoint
+        )
 
         logger.info(f"  Heating setpoint: {hvac_params.heating_setpoint}°C")
         logger.info(f"  Cooling setpoint: {hvac_params.cooling_setpoint}°C")
-        logger.info("  ✓ HVAC system added")
+        logger.info("  ✓ HVAC system added with custom setpoints")
 
     # NOW save the complete IDF (geometry + HVAC)
     idf.save(str(output_path))

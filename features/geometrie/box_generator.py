@@ -67,16 +67,22 @@ class SimpleBoxGenerator:
         self,
         geometry: BuildingGeometry,
         idf_path: Optional[Path | str] = None,
+        sim_settings: Optional[dict] = None
     ) -> IDF:
         """Create a simple box building model.
 
         Args:
             geometry: Building geometry parameters
             idf_path: Path to save the IDF file (optional)
+            sim_settings: Simulation settings (timestep, run_period, output_variables, reporting_frequency)
 
         Returns:
             IDF object
         """
+        # Initialize sim_settings with defaults
+        if sim_settings is None:
+            sim_settings = {}
+
         # Initialize IDF with EnergyPlus version
         idd_file = self._get_idd_file()
         IDF.setiddname(idd_file)
@@ -109,11 +115,20 @@ class SimpleBoxGenerator:
         # Add global geometry rules
         self._add_global_geometry_rules(idf)
 
-        # Add timestep
-        self._add_timestep(idf)
+        # Add timestep (with user settings)
+        self._add_timestep(
+            idf,
+            timesteps_per_hour=sim_settings.get('timestep', 4)
+        )
 
-        # Add run period
-        self._add_run_period(idf)
+        # Add run period (with user settings)
+        self._add_run_period(
+            idf,
+            start_month=sim_settings.get('start_month', 1),
+            start_day=sim_settings.get('start_day', 1),
+            end_month=sim_settings.get('end_month', 12),
+            end_day=sim_settings.get('end_day', 31)
+        )
 
         # Add design days (REQUIRED for HVAC sizing)
         self._add_design_days(idf)
@@ -143,8 +158,12 @@ class SimpleBoxGenerator:
         # For simulations, use an example IDF with HVAC as a starting point
         # Or add HVAC objects manually after generation
 
-        # Add output variables
-        self._add_output_variables(idf)
+        # Add output variables (with user settings)
+        self._add_output_variables(
+            idf,
+            variables=sim_settings.get('output_variables'),
+            reporting_frequency=sim_settings.get('reporting_frequency', 'Hourly')
+        )
 
         # Save if path provided
         if idf_path:
@@ -210,19 +229,39 @@ class SimpleBoxGenerator:
             Coordinate_System="Relative",
         )
 
-    def _add_timestep(self, idf: IDF) -> None:
-        """Add Timestep object."""
-        idf.newidfobject("TIMESTEP", Number_of_Timesteps_per_Hour=4)
+    def _add_timestep(self, idf: IDF, timesteps_per_hour: int = 4) -> None:
+        """Add Timestep object.
 
-    def _add_run_period(self, idf: IDF) -> None:
-        """Add RunPeriod for annual simulation."""
+        Args:
+            idf: IDF object
+            timesteps_per_hour: Number of timesteps per hour (1-60, default: 4)
+        """
+        idf.newidfobject("TIMESTEP", Number_of_Timesteps_per_Hour=timesteps_per_hour)
+
+    def _add_run_period(
+        self,
+        idf: IDF,
+        start_month: int = 1,
+        start_day: int = 1,
+        end_month: int = 12,
+        end_day: int = 31
+    ) -> None:
+        """Add RunPeriod for simulation.
+
+        Args:
+            idf: IDF object
+            start_month: Start month (1-12, default: 1)
+            start_day: Start day (1-31, default: 1)
+            end_month: End month (1-12, default: 12)
+            end_day: End day (1-31, default: 31)
+        """
         idf.newidfobject(
             "RUNPERIOD",
-            Name="AnnualSimulation",
-            Begin_Month=1,
-            Begin_Day_of_Month=1,
-            End_Month=12,
-            End_Day_of_Month=31,
+            Name="SimulationPeriod",
+            Begin_Month=start_month,
+            Begin_Day_of_Month=start_day,
+            End_Month=end_month,
+            End_Day_of_Month=end_day,
             Day_of_Week_for_Start_Day="Monday",
             Use_Weather_File_Holidays_and_Special_Days="Yes",
             Use_Weather_File_Daylight_Saving_Period="Yes",
@@ -794,22 +833,34 @@ class SimpleBoxGenerator:
                 Zone_Return_Air_Node_or_NodeList_Name="",
             )
 
-    def _add_output_variables(self, idf: IDF) -> None:
-        """Add output variables for results."""
-        output_vars = [
-            "Zone Mean Air Temperature",
-            "Zone Air System Sensible Heating Energy",
-            "Zone Air System Sensible Cooling Energy",
-            "Zone Lights Electric Energy",
-            "Zone Electric Equipment Electric Energy",
-        ]
+    def _add_output_variables(
+        self,
+        idf: IDF,
+        variables: list[str] = None,
+        reporting_frequency: str = "Hourly"
+    ) -> None:
+        """Add output variables for results.
 
-        for var in output_vars:
+        Args:
+            idf: IDF object
+            variables: List of output variable names (default: standard energy variables)
+            reporting_frequency: Reporting frequency (Timestep, Hourly, Daily, Monthly)
+        """
+        if variables is None:
+            variables = [
+                "Zone Mean Air Temperature",
+                "Zone Air System Sensible Heating Energy",
+                "Zone Air System Sensible Cooling Energy",
+                "Zone Lights Electric Energy",
+                "Zone Electric Equipment Electric Energy",
+            ]
+
+        for var in variables:
             idf.newidfobject(
                 "OUTPUT:VARIABLE",
                 Key_Value="*",
                 Variable_Name=var,
-                Reporting_Frequency="Hourly",
+                Reporting_Frequency=reporting_frequency,
             )
 
         # Add summary reports

@@ -60,7 +60,8 @@ class FiveZoneGenerator:
     def create_from_energieausweis(
         self,
         ea_data: EnergieausweisInput,
-        output_path: Optional[Path] = None
+        output_path: Optional[Path] = None,
+        sim_settings: Optional[dict] = None
     ) -> IDF:
         """
         Erstellt 5-Zonen-IDF aus Energieausweis-Daten.
@@ -68,10 +69,14 @@ class FiveZoneGenerator:
         Args:
             ea_data: Energieausweis-Eingabedaten
             output_path: Pfad zum Speichern des IDF (optional)
+            sim_settings: Simulation settings (timestep, run_period, output_variables, reporting_frequency)
 
         Returns:
             IDF-Objekt
         """
+        # Initialize sim_settings with defaults
+        if sim_settings is None:
+            sim_settings = {}
 
         # 1. Geometrie rekonstruieren
         geo_solution = self.geometry_solver.solve(ea_data)
@@ -105,8 +110,8 @@ class FiveZoneGenerator:
         # 5. Materialien & Konstruktionen (mit U-Werten)
         self._add_constructions_from_u_values(idf, ea_data)
 
-        # 6. Simulation Control & Settings
-        self._add_simulation_settings(idf, geo_solution)
+        # 6. Simulation Control & Settings (with user settings)
+        self._add_simulation_settings(idf, geo_solution, sim_settings)
 
         # 7. Zonen erstellen
         self._add_zones(idf, layouts)
@@ -125,8 +130,8 @@ class FiveZoneGenerator:
         # 10.5 HVAC System (IdealLoads)
         self._add_hvac_system(idf)
 
-        # 11. Output Variables
-        self._add_output_variables(idf)
+        # 11. Output Variables (with user settings)
+        self._add_output_variables(idf, sim_settings)
 
         # 12. Speichern falls Pfad angegeben
         if output_path:
@@ -205,8 +210,8 @@ class FiveZoneGenerator:
         # 5. Materialien & Konstruktionen (mit U-Werten)
         self._add_constructions_from_u_values(idf, ea_data)
 
-        # 6. Simulation Control & Settings
-        self._add_simulation_settings(idf, geo_solution)
+        # 6. Simulation Control & Settings (with user settings)
+        self._add_simulation_settings(idf, geo_solution, sim_settings)
 
         # 7. Zonen erstellen
         self._add_zones(idf, layouts)
@@ -225,8 +230,8 @@ class FiveZoneGenerator:
         # 10.5 HVAC System (IdealLoads)
         self._add_hvac_system(idf)
 
-        # 11. Output Variables
-        self._add_output_variables(idf)
+        # 11. Output Variables (with user settings)
+        self._add_output_variables(idf, sim_settings)
 
         # 12. Speichern falls Pfad angegeben
         if output_path:
@@ -341,10 +346,11 @@ class FiveZoneGenerator:
     def _add_simulation_settings(
         self,
         idf: IDF,
-        geo_solution: GeometrySolution
+        geo_solution: GeometrySolution,
+        sim_settings: dict = None
     ) -> None:
         """Delegiert zu MetadataGenerator."""
-        self.metadata_gen.add_simulation_settings(idf, geo_solution)
+        self.metadata_gen.add_simulation_settings(idf, geo_solution, sim_settings)
         self.metadata_gen.add_site_location(idf)
 
     # ========================================================================
@@ -513,6 +519,6 @@ class FiveZoneGenerator:
     # OUTPUT VARIABLES
     # ========================================================================
 
-    def _add_output_variables(self, idf: IDF) -> None:
+    def _add_output_variables(self, idf: IDF, sim_settings: dict = None) -> None:
         """Delegiert zu MetadataGenerator."""
-        self.metadata_gen.add_output_variables(idf)
+        self.metadata_gen.add_output_variables(idf, sim_settings)

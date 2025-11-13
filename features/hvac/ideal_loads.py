@@ -100,7 +100,9 @@ class HVACTemplateManager:
     def apply_template_simple(
         self,
         idf: IDF,
-        template_name: str = "ideal_loads"
+        template_name: str = "ideal_loads",
+        heating_setpoint: float = 20.0,
+        cooling_setpoint: float = 26.0
     ) -> IDF:
         """Apply HVAC template to an IDF using simple ideal loads system.
 
@@ -110,6 +112,8 @@ class HVACTemplateManager:
         Args:
             idf: IDF object to add HVAC to
             template_name: Name of template (currently only "ideal_loads" fully supported)
+            heating_setpoint: Heating setpoint temperature in °C (default: 20.0)
+            cooling_setpoint: Cooling setpoint temperature in °C (default: 26.0)
 
         Returns:
             Modified IDF object
@@ -134,10 +138,10 @@ class HVACTemplateManager:
         self._ensure_global_objects(idf)
 
         # Add schedules if not present
-        self._ensure_schedules(idf)
+        self._ensure_schedules(idf, heating_setpoint, cooling_setpoint)
 
         # Add shared thermostat ONCE for all zones
-        self._add_shared_thermostat(idf)
+        self._add_shared_thermostat(idf, heating_setpoint, cooling_setpoint)
 
         # Add HVAC for each zone
         for zone in zones:
@@ -235,11 +239,21 @@ class HVACTemplateManager:
             Numeric_Type="DISCRETE"
         )
 
-    def _ensure_schedules(self, idf: IDF) -> None:
+    def _ensure_schedules(
+        self,
+        idf: IDF,
+        heating_setpoint: float = 20.0,
+        cooling_setpoint: float = 26.0
+    ) -> None:
         """Ensure required schedules exist in IDF.
 
         Creates schedules following the pattern from EnergyPlus example.
         Removes and recreates schedules to ensure correct values.
+
+        Args:
+            idf: IDF object
+            heating_setpoint: Heating setpoint temperature in °C
+            cooling_setpoint: Cooling setpoint temperature in °C
         """
         # First ensure ScheduleTypeLimits exist
         self._ensure_schedule_type_limits(idf)
@@ -264,20 +278,20 @@ class HVACTemplateManager:
             Hourly_Value=4.0,  # 4 = DualSetpoint control type
         )
 
-        # Create Heating setpoint schedule (constant 20°C)
+        # Create Heating setpoint schedule (user-defined temperature)
         idf.newidfobject(
             "SCHEDULE:CONSTANT",
             Name="HeatingSetpoint",
             Schedule_Type_Limits_Name="Temperature",  # Temperature range
-            Hourly_Value=20.0,  # 20°C heating setpoint
+            Hourly_Value=heating_setpoint,  # User-defined heating setpoint
         )
 
-        # Create Cooling setpoint schedule (constant 26°C)
+        # Create Cooling setpoint schedule (user-defined temperature)
         idf.newidfobject(
             "SCHEDULE:CONSTANT",
             Name="CoolingSetpoint",
             Schedule_Type_Limits_Name="Temperature",  # Temperature range
-            Hourly_Value=26.0,  # 26°C cooling setpoint
+            Hourly_Value=cooling_setpoint,  # User-defined cooling setpoint
         )
 
         # NOTE: ThermostatSetpoint:DualSetpoint is NOT created manually anymore!
@@ -335,12 +349,22 @@ class HVACTemplateManager:
             # Cleanup
             Path(tmp_path).unlink(missing_ok=True)
 
-    def _add_shared_thermostat(self, idf: IDF) -> None:
+    def _add_shared_thermostat(
+        self,
+        idf: IDF,
+        heating_setpoint: float = 20.0,
+        cooling_setpoint: float = 26.0
+    ) -> None:
         """
         Add shared thermostat for all zones (loaded once globally).
 
         Uses HVACTEMPLATE:THERMOSTAT which ExpandObjects will convert
         to proper thermostat objects.
+
+        Args:
+            idf: IDF object
+            heating_setpoint: Heating setpoint temperature in °C
+            cooling_setpoint: Cooling setpoint temperature in °C
         """
         # Check if thermostat already exists - remove old ones
         existing = [
@@ -373,16 +397,16 @@ class HVACTemplateManager:
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
         else:
-            # Fallback: Create directly
+            # Fallback: Create directly with user-defined setpoints
             idf.newidfobject(
                 "HVACTEMPLATE:THERMOSTAT",
                 Name="All Zones",
                 Heating_Setpoint_Schedule_Name="",
-                Constant_Heating_Setpoint=20.0,
+                Constant_Heating_Setpoint=heating_setpoint,
                 Cooling_Setpoint_Schedule_Name="",
-                Constant_Cooling_Setpoint=26.0,
+                Constant_Cooling_Setpoint=cooling_setpoint,
             )
-            print("   ✅ Created shared thermostat directly")
+            print(f"   ✅ Created shared thermostat directly (Heating: {heating_setpoint}°C, Cooling: {cooling_setpoint}°C)")
 
     def _add_ideal_loads_to_zone(self, idf: IDF, zone_name: str) -> None:
         """
@@ -546,16 +570,25 @@ class HVACTemplateManager:
 
 def create_building_with_hvac(
     geometry_idf: IDF,
-    hvac_template: str = "ideal_loads"
+    hvac_template: str = "ideal_loads",
+    heating_setpoint: float = 20.0,
+    cooling_setpoint: float = 26.0
 ) -> IDF:
     """Convenience function to add HVAC to a geometry IDF.
 
     Args:
         geometry_idf: IDF with building geometry (from SimpleBoxGenerator)
         hvac_template: Name of HVAC template to apply
+        heating_setpoint: Heating setpoint temperature in °C (default: 20.0)
+        cooling_setpoint: Cooling setpoint temperature in °C (default: 26.0)
 
     Returns:
         IDF with HVAC system added
     """
     manager = HVACTemplateManager()
-    return manager.apply_template_simple(geometry_idf, hvac_template)
+    return manager.apply_template_simple(
+        geometry_idf,
+        hvac_template,
+        heating_setpoint=heating_setpoint,
+        cooling_setpoint=cooling_setpoint
+    )

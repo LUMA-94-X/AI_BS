@@ -150,6 +150,14 @@ class SimulationParams(BaseModel):
 
     weather_file: str = Field(description="Path to EPW weather file (relative or absolute)")
 
+    # Simulation timestep
+    timestep: int = Field(
+        default=4,
+        ge=1,
+        le=60,
+        description="Number of timesteps per hour (1-60). Default: 4 (15 min intervals)"
+    )
+
     period: SimulationPeriod = Field(default_factory=SimulationPeriod)
     output: OutputParams = Field(default_factory=OutputParams)
 

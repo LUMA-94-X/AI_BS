@@ -195,8 +195,13 @@ if hvac_type == "Ideal Loads Air System":
                         IDF.setiddname(idd_file)
                         idf = IDF(str(idf_path))
 
-                    # HVAC hinzufügen
-                    idf = create_building_with_hvac(idf)
+                    # HVAC hinzufügen mit User-Setpoints
+                    hvac_config = st.session_state.get('hvac_config', {})
+                    idf = create_building_with_hvac(
+                        idf,
+                        heating_setpoint=hvac_config.get('heating_setpoint', 20.0),
+                        cooling_setpoint=hvac_config.get('cooling_setpoint', 26.0)
+                    )
 
                     # IDF speichern
                     idf.save(str(idf_path))

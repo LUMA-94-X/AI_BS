@@ -105,6 +105,103 @@ with col3:
     st.write(f"- Wetterdaten: example.epw")
     st.write(f"- Zeitraum: 1 Jahr (8760 h)")
 
+# Advanced Simulation Settings
+st.markdown("---")
+with st.expander("⚙️ Advanced Simulation Settings", expanded=False):
+    st.markdown("""
+    **Expert Options**: Customize simulation timestep and output parameters.
+    Leave defaults for standard annual energy simulation.
+    """)
+
+    col_sim1, col_sim2 = st.columns(2)
+
+    with col_sim1:
+        st.markdown("#### Timestep")
+        timestep = st.select_slider(
+            "Timesteps per hour",
+            options=[1, 2, 4, 6, 10, 12, 15, 20, 30, 60],
+            value=4,
+            help="Higher = more accurate but slower. 4 is standard (15 min intervals)."
+        )
+        st.caption(f"1 timestep = {60/timestep:.1f} minutes")
+
+    with col_sim2:
+        st.markdown("#### Reporting")
+        reporting_freq = st.selectbox(
+            "Output Frequency",
+            options=["Timestep", "Hourly", "Daily", "Monthly"],
+            index=1,  # Hourly default
+            help="How often to save results"
+        )
+
+    # Run Period
+    st.markdown("#### Simulation Period")
+    col_per1, col_per2 = st.columns(2)
+
+    with col_per1:
+        start_month = st.selectbox("Start Month", options=list(range(1, 13)), index=0, format_func=lambda x: f"{x:02d}")
+        start_day = st.number_input("Start Day", min_value=1, max_value=31, value=1)
+
+    with col_per2:
+        end_month = st.selectbox("End Month", options=list(range(1, 13)), index=11, format_func=lambda x: f"{x:02d}")
+        end_day = st.number_input("End Day", min_value=1, max_value=31, value=31)
+
+    # Output Variables
+    st.markdown("#### Output Variables")
+    output_presets = st.selectbox(
+        "Output Preset",
+        options=["Standard (Energy + Temperature)", "Extended (+ Surfaces)", "Minimal", "Custom"],
+        index=0
+    )
+
+    if output_presets == "Custom":
+        custom_vars = st.text_area(
+            "Output Variables (one per line)",
+            value="Zone Mean Air Temperature\nZone Air System Sensible Heating Energy\nZone Air System Sensible Cooling Energy",
+            height=150,
+            help="Enter EnergyPlus output variable names, one per line"
+        )
+        output_variables = [v.strip() for v in custom_vars.split('\n') if v.strip()]
+    else:
+        # Predefined lists
+        presets = {
+            "Standard (Energy + Temperature)": [
+                "Zone Mean Air Temperature",
+                "Zone Air System Sensible Heating Energy",
+                "Zone Air System Sensible Cooling Energy",
+                "Site Outdoor Air Drybulb Temperature",
+            ],
+            "Extended (+ Surfaces)": [
+                "Zone Mean Air Temperature",
+                "Zone Air System Sensible Heating Energy",
+                "Zone Air System Sensible Cooling Energy",
+                "Site Outdoor Air Drybulb Temperature",
+                "Surface Inside Face Temperature",
+                "Surface Outside Face Temperature",
+                "Zone Lights Electric Energy",
+                "Zone Electric Equipment Electric Energy",
+            ],
+            "Minimal": [
+                "Zone Mean Air Temperature",
+                "Zone Air System Sensible Heating Energy",
+                "Zone Air System Sensible Cooling Energy",
+            ]
+        }
+        output_variables = presets.get(output_presets, presets["Standard (Energy + Temperature)"])
+
+    st.caption(f"Selected: {len(output_variables)} variables")
+
+    # Store in session state
+    st.session_state['sim_settings'] = {
+        'timestep': timestep,
+        'reporting_frequency': reporting_freq,
+        'start_month': start_month,
+        'start_day': start_day,
+        'end_month': end_month,
+        'end_day': end_day,
+        'output_variables': output_variables
+    }
+
 # Wetterdatei-Auswahl
 st.markdown("---")
 st.subheader("🌦️ Wetterdaten")
@@ -121,6 +218,9 @@ if weather_dir.exists():
         )
         # Find the selected file
         weather_path = [f for f in weather_files if f.name == weather_file][0]
+
+        # Store in session state for later export
+        st.session_state['weather_file'] = str(weather_path)
     else:
         st.error("❌ Keine Wetterdateien gefunden in `resources/energyplus/weather/`")
         st.stop()
@@ -209,14 +309,22 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
                     st.error("❌ Keine Geometrie gefunden")
                     st.stop()
 
+                # Get simulation settings from session state
+                sim_settings = st.session_state.get('sim_settings', {})
+
                 generator = SimpleBoxGenerator()
-                idf = generator.create_model(geometry, idf_path)
+                idf = generator.create_model(geometry, idf_path, sim_settings=sim_settings)
 
                 progress_bar.progress(30)
                 status_text.info("❄️ Füge HVAC-System hinzu...")
 
-                # HVAC hinzufügen
-                idf = create_building_with_hvac(idf)
+                # HVAC hinzufügen mit User-Setpoints
+                hvac_config = st.session_state.get('hvac_config', {})
+                idf = create_building_with_hvac(
+                    idf,
+                    heating_setpoint=hvac_config.get('heating_setpoint', 20.0),
+                    cooling_setpoint=hvac_config.get('cooling_setpoint', 26.0)
+                )
                 idf.save(str(idf_path))
 
                 progress_bar.progress(40)

@@ -3,6 +3,7 @@
 import streamlit as st
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # Projekt-Root zum Path hinzufügen
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -10,6 +11,26 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from features.auswertung.kpi_rechner import KennzahlenRechner
 from features.auswertung.visualisierung import ErgebnisVisualisierer
 from features.auswertung.sql_parser import EnergyPlusSQLParser
+
+
+# Helper functions for dict/object compatibility
+def get_source(building_model):
+    """Get source from building_model (handles dict or object)."""
+    if not building_model:
+        return None
+    if isinstance(building_model, dict):
+        return building_model.get('source')
+    return getattr(building_model, 'source', None)
+
+
+def get_attr_safe(obj, attr, default=None):
+    """Safely get attribute from dict or object."""
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(attr, default)
+    return getattr(obj, attr, default)
+
 
 st.set_page_config(
     page_title="Ergebnisse - Gebäudesimulation",
@@ -37,9 +58,9 @@ from core.building_model import get_building_model_from_session
 building_model = get_building_model_from_session(st.session_state)
 if building_model:
     # 5-Zone oder SimpleBox via BuildingModel
-    geom_summary = building_model.geometry_summary
+    geom_summary = get_attr_safe(building_model, 'geometry_summary', {})
     total_floor_area = geom_summary.get('total_floor_area', 0)
-    is_five_zone = building_model.source == "energieausweis"
+    is_five_zone = get_source(building_model) == "energieausweis"
 elif 'geometry' in st.session_state:
     # Legacy SimpleBox
     geometry = st.session_state['geometry']
@@ -66,12 +87,13 @@ try:
     # TAB-STRUKTUR
     # =============================================================================
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🎯 Übersicht",
         "📊 Energetische Auswertung",
         "🌡️ Behaglichkeit",
         "💰 Wirtschaftlichkeit",
-        "🏗️ Zonenauswertung"
+        "🏗️ Zonenauswertung",
+        "📋 Input Summary"
     ])
 
     # =============================================================================
@@ -597,6 +619,186 @@ try:
             Dies ermöglicht eine detailliertere Analyse der Energiebedarfe nach Orientierung
             und Sonneneinstrahlung.
             """)
+
+    # =============================================================================
+    # TAB 6: INPUT SUMMARY
+    # =============================================================================
+    with tab6:
+        st.subheader("📋 Input Summary - All Parameters Used")
+
+        st.markdown("""
+        This tab shows all input parameters that were used for this simulation.
+        Use this for documentation and to verify your simulation setup.
+        """)
+
+        # Section 1: Geometry
+        st.markdown("---")
+        st.markdown("### 🏗️ Geometry")
+
+        building_model = st.session_state.get('building_model')
+        if building_model:
+            geom_summary = get_attr_safe(building_model, 'geometry_summary', {})
+            if get_source(building_model) == "energieausweis":
+                st.markdown(f"""
+                **Source:** 5-Zone Model (Energieausweis)
+                **Building Type:** {get_attr_safe(building_model, 'gebaeudetyp', 'N/A')}
+                **Zones:** {get_attr_safe(building_model, 'num_zones', 'N/A')}
+                **Floor Area:** {geom_summary.get('total_floor_area', 0):.1f} m²
+                **Floors:** {geom_summary.get('num_floors', 0)}
+                **Dimensions:** {geom_summary.get('length', 0):.2f}m × {geom_summary.get('width', 0):.2f}m × {geom_summary.get('height', 0):.2f}m
+                """)
+            else:
+                st.markdown(f"""
+                **Source:** SimpleBox
+                **Dimensions:** {geom_summary.get('length', 0):.2f}m × {geom_summary.get('width', 0):.2f}m × {geom_summary.get('height', 0):.2f}m
+                **Floor Area:** {geom_summary.get('total_floor_area', 0):.1f} m²
+                **Floors:** {geom_summary.get('num_floors', 1)}
+                **WWR:** {geom_summary.get('window_wall_ratio', 0.3):.1%}
+                **Orientation:** {geom_summary.get('orientation', 0):.0f}°
+                """)
+        elif 'geometry' in st.session_state:
+            geometry = st.session_state['geometry']
+            st.markdown(f"""
+            **Source:** SimpleBox (Legacy)
+            **Dimensions:** {geometry.length:.2f}m × {geometry.width:.2f}m × {geometry.height:.2f}m
+            **Floor Area:** {geometry.total_floor_area:.1f} m²
+            **Floors:** {geometry.num_floors}
+            **WWR:** {geometry.window_wall_ratio:.1%}
+            """)
+        else:
+            st.warning("No geometry data available")
+
+        # Section 2: Envelope (if available from Energieausweis)
+        if building_model and get_source(building_model) == "energieausweis":
+            ea_data = get_attr_safe(building_model, 'energieausweis_data')
+            if ea_data:
+                st.markdown("---")
+                st.markdown("### 🧱 Envelope (U-values)")
+                st.markdown(f"""
+                **Wall:** {ea_data.get('u_wert_wand', 'N/A')} W/m²K
+                **Roof:** {ea_data.get('u_wert_dach', 'N/A')} W/m²K
+                **Floor:** {ea_data.get('u_wert_boden', 'N/A')} W/m²K
+                **Windows:** {ea_data.get('u_wert_fenster', 'N/A')} W/m²K
+                """)
+
+        # Section 3: HVAC
+        st.markdown("---")
+        st.markdown("### ❄️ HVAC System")
+
+        hvac_config = st.session_state.get('hvac_config', {})
+        if hvac_config:
+            st.markdown(f"""
+            **System Type:** {hvac_config.get('type', 'N/A')}
+            **Heating Setpoint:** {hvac_config.get('heating_setpoint', 20):.1f}°C
+            **Cooling Setpoint:** {hvac_config.get('cooling_setpoint', 26):.1f}°C
+            **Air Change Rate:** {hvac_config.get('air_change_rate', 0):.2f} ACH
+            **Outdoor Air:** {'Yes' if hvac_config.get('outdoor_air', False) else 'No'}
+            """)
+        else:
+            st.info("No HVAC configuration found")
+
+        # Section 4: Simulation Settings
+        st.markdown("---")
+        st.markdown("### ⚙️ Simulation Settings")
+
+        sim_settings = st.session_state.get('sim_settings', {})
+        weather_file = st.session_state.get('weather_file', 'N/A')
+
+        timestep = sim_settings.get('timestep', 4)
+        st.markdown(f"""
+        **Weather File:** `{Path(weather_file).name if weather_file != 'N/A' else 'N/A'}`
+        **Timestep:** {timestep}/hour ({60/timestep:.1f} min intervals)
+        **Run Period:** {sim_settings.get('start_month', 1)}/{sim_settings.get('start_day', 1)} - {sim_settings.get('end_month', 12)}/{sim_settings.get('end_day', 31)}
+        **Reporting Frequency:** {sim_settings.get('reporting_frequency', 'Hourly')}
+        **Output Variables:** {len(sim_settings.get('output_variables', []))} variables
+        """)
+
+        # Show output variables in expander
+        if sim_settings.get('output_variables'):
+            with st.expander("📊 Output Variables List"):
+                for var in sim_settings['output_variables']:
+                    st.text(f"• {var}")
+
+        # YAML Export Section
+        st.markdown("---")
+        st.markdown("### 💾 Export Configuration")
+
+        st.markdown("""
+        Export this simulation setup as a YAML configuration file.
+        You can use this file to reproduce the simulation via command line:
+        ```bash
+        python scripts/run_from_config.py exported_config.yaml
+        ```
+        """)
+
+        if st.button("📥 Export as YAML", type="primary", key="export_yaml_btn"):
+            try:
+                # Check if this is a SimpleBox model (building_model can be dict or object)
+                source = None
+                if building_model:
+                    if isinstance(building_model, dict):
+                        source = building_model.get('source')
+                    else:
+                        source = getattr(building_model, 'source', None)
+
+                if source == "energieausweis":
+                    st.error("""
+                    ❌ **Energieausweis YAML export not yet supported**
+
+                    YAML export is currently only available for **SimpleBox models**.
+
+                    The Energieausweis workflow uses a more complex 5-zone geometry
+                    that requires additional schema extensions. This feature is planned
+                    for a future release.
+
+                    **Workaround:** Use the Input Summary above for documentation.
+                    """)
+                else:
+                    # Import builder
+                    import sys
+                    from pathlib import Path as P
+                    sys.path.insert(0, str(P(__file__).parent.parent.parent.parent))
+
+                    from features.web_ui.utils.config_builder import build_simulation_config_from_ui
+                    import yaml
+
+                    # Build config from session state
+                    config = build_simulation_config_from_ui(st.session_state)
+
+                    # Convert to YAML string
+                    yaml_str = yaml.dump(
+                        config.model_dump(exclude_none=True),
+                        default_flow_style=False,
+                        sort_keys=False,
+                        allow_unicode=True,
+                        indent=2
+                    )
+
+                    # Generate filename
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"simulation_config_{timestamp}.yaml"
+
+                    # Download button
+                    st.download_button(
+                        label="💾 Download YAML Config",
+                        data=yaml_str,
+                        file_name=filename,
+                        mime="text/yaml",
+                        key="download_yaml_btn"
+                    )
+
+                    st.success(f"✅ Configuration exported successfully!")
+
+                    # Preview
+                    with st.expander("📄 YAML Preview"):
+                        st.code(yaml_str, language="yaml")
+
+            except NotImplementedError as e:
+                st.error(f"❌ {str(e)}")
+            except Exception as e:
+                st.error(f"❌ Export failed: {str(e)}")
+                with st.expander("🐛 Error Details"):
+                    st.exception(e)
 
 except Exception as e:
     st.error(f"❌ Fehler beim Laden der Ergebnisse: {str(e)}")

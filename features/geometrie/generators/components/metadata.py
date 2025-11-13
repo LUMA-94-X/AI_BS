@@ -28,18 +28,23 @@ class MetadataGenerator:
     def add_simulation_settings(
         self,
         idf: Any,
-        geo_solution: Any = None
+        geo_solution: Any = None,
+        sim_settings: dict = None
     ) -> None:
         """Fügt Simulation Control, Building, Timestep, etc. hinzu.
 
         Args:
             idf: eppy IDF-Objekt
             geo_solution: GeometrySolution (aktuell nicht verwendet, für zukünftige Erweiterungen)
+            sim_settings: User simulation settings (timestep, run_period, etc.)
 
         Note:
             Zone/System Sizing ist auf "No" gesetzt, da IdealLoads HVAC verwendet wird.
             IdealLoads braucht kein Sizing - es liefert unbegrenzt Heiz-/Kühlleistung.
         """
+        # Initialize sim_settings with defaults
+        if sim_settings is None:
+            sim_settings = {}
         # SimulationControl - Nur Annual Simulation (Weather File)
         idf.newidfobject(
             "SIMULATIONCONTROL",
@@ -69,14 +74,15 @@ class MetadataGenerator:
             Minimum_Number_of_Warmup_Days=6,
         )
 
-        # Timestep
+        # Timestep (with user settings)
+        timestep = sim_settings.get('timestep', self.config.timestep)
         idf.newidfobject(
             "TIMESTEP",
-            Number_of_Timesteps_per_Hour=self.config.timestep
+            Number_of_Timesteps_per_Hour=timestep
         )
 
-        # RunPeriod (Jahressimulation)
-        self._add_run_period(idf)
+        # RunPeriod (Jahressimulation, with user settings)
+        self._add_run_period(idf, sim_settings)
 
         # Design Days (für HVAC-Sizing, falls zukünftig benötigt)
         if self.config.include_design_days:
@@ -107,22 +113,47 @@ class MetadataGenerator:
     def add_output_variables(
         self,
         idf: Any,
+        sim_settings: dict = None,
         output_config: OutputConfig = None
     ) -> None:
         """Fügt Output Variables hinzu.
 
         Args:
             idf: eppy IDF-Objekt
+            sim_settings: User simulation settings (output_variables, reporting_frequency)
             output_config: Output-Konfiguration (verwendet Standard falls None)
         """
+        if sim_settings is None:
+            sim_settings = {}
+
+        # Check if user provided custom variables
+        custom_vars = sim_settings.get('output_variables')
+        reporting_freq = sim_settings.get('reporting_frequency', 'Hourly')
+
+        # Get config for SQLite and summary reports
         config = output_config or OutputConfig.standard_outputs()
 
-        # Output-Variablen
-        for var in config.variables:
-            idf.newidfobject(
-                "OUTPUT:VARIABLE",
-                **var.to_idf_args()
-            )
+        if custom_vars:
+            # Use custom variables from user
+            for var_name in custom_vars:
+                idf.newidfobject(
+                    "OUTPUT:VARIABLE",
+                    Key_Value="*",
+                    Variable_Name=var_name,
+                    Reporting_Frequency=reporting_freq
+                )
+        else:
+            # Use OutputConfig defaults
+            # Output-Variablen
+            for var in config.variables:
+                # Override frequency if user specified
+                var_args = var.to_idf_args()
+                if 'reporting_frequency' in sim_settings:
+                    var_args['Reporting_Frequency'] = reporting_freq
+                idf.newidfobject(
+                    "OUTPUT:VARIABLE",
+                    **var_args
+                )
 
         # Output:SQLite für Ergebnis-Analyse
         if config.include_sqlite:
@@ -137,15 +168,27 @@ class MetadataGenerator:
             Report_1_Name="AllSummary",
         )
 
-    def _add_run_period(self, idf: Any) -> None:
+    def _add_run_period(self, idf: Any, sim_settings: dict = None) -> None:
         """Fügt RunPeriod hinzu (intern).
 
         Args:
             idf: eppy IDF-Objekt
+            sim_settings: User simulation settings
         """
-        # Parse start/end dates (format: "MM/DD")
-        start_month, start_day = map(int, self.config.run_period_start.split('/'))
-        end_month, end_day = map(int, self.config.run_period_end.split('/'))
+        if sim_settings is None:
+            sim_settings = {}
+
+        # Get period from sim_settings or use config defaults
+        start_month = sim_settings.get('start_month')
+        start_day = sim_settings.get('start_day')
+        end_month = sim_settings.get('end_month')
+        end_day = sim_settings.get('end_day')
+
+        # Fallback to config defaults if not provided
+        if start_month is None or start_day is None:
+            start_month, start_day = map(int, self.config.run_period_start.split('/'))
+        if end_month is None or end_day is None:
+            end_month, end_day = map(int, self.config.run_period_end.split('/'))
 
         idf.newidfobject(
             "RUNPERIOD",
