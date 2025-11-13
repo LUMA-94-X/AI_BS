@@ -26,7 +26,7 @@ Ein Python-Framework für einfache und automatisierte Gebäudeenergiesimulatione
 **Schnellstart:**
 ```powershell
 # Doppelklick auf:
-SCHNELLSTART_WINDOWS.bat
+0_Setup\SCHNELLSTART_WINDOWS.bat
 ```
 
 **Manuelles Setup:**
@@ -35,8 +35,8 @@ SCHNELLSTART_WINDOWS.bat
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 
-# 2. Abhängigkeiten installieren (ohne Streamlit UI)
-pip install eppy pandas pydantic numpy pyyaml tqdm plotly
+# 2. Abhängigkeiten installieren
+pip install -r 0_Setup\requirements.txt
 
 # 3. EnergyPlus-Pfad prüfen
 python -c "from core.config import get_config; print(get_config().energyplus.get_executable_path())"
@@ -45,18 +45,21 @@ python -c "from core.config import get_config; print(get_config().energyplus.get
 ### Linux/macOS Setup
 
 ```bash
-# 1. Virtual Environment erstellen
+# 1. Setup-Script ausführen (empfohlen)
+bash 0_Setup/setup_linux.sh
+
+# 2. Oder manuell:
 python3 -m venv venv
 source venv/bin/activate
-
-# 2. Abhängigkeiten installieren
-pip install eppy pandas pydantic numpy pyyaml tqdm plotly
+pip install -r 0_Setup/requirements.txt
 
 # 3. Konfiguration prüfen
 python -c "from core.config import get_config; print(get_config().energyplus.get_executable_path())"
 ```
 
 **Hinweis:** Die Web-UI (Streamlit) benötigt zusätzlich Visual Studio Build Tools (Windows) oder einen C++ Compiler, da sie pyarrow voraussetzt.
+
+**Detaillierte Setup-Anleitung:** Siehe `0_Setup/ERSTE_SCHRITTE.md`
 
 ## 🚀 Schnellstart
 
@@ -155,13 +158,20 @@ simulation:
 - ✅ **Documented** - Self-describing configurations
 - ✅ **Fast** - Single command to run
 
-See `scenarios/README.md` for complete configuration schema and examples.
+**Dokumentation:**
+- 📋 **Kompletter Workflow:** `scripts/YAML_SIMULATION_WORKFLOW.md` - Schritt-für-Schritt Anleitung
+- 📚 **Config Schema:** `scenarios/README.md` - Vollständiges YAML-Schema und Beispiele
 
 ## 📁 Projekt-Struktur
 
 ```
 AI_BS/
-├── features/              # Feature-Module
+├── 0_Setup/              # Installation & Setup (NEU!)
+│   ├── SCHNELLSTART_WINDOWS.bat
+│   ├── ERSTE_SCHRITTE.md
+│   ├── requirements.txt
+│   └── setup_*.sh/bat/ps1
+├── features/             # Feature-Module
 │   ├── geometrie/        # Gebäudegeometrie
 │   │   ├── generators/   # SimpleBox + 5-Zone-Generator (NEU!)
 │   │   ├── models/       # Energieausweis-Input-Modelle (NEU!)
@@ -171,7 +181,7 @@ AI_BS/
 │   ├── auswertung/       # Ergebnisanalyse
 │   └── web_ui/           # Web-Interface
 │       └── pages/        # Streamlit-Pages inkl. Energieausweis (NEU!)
-├── core/                  # Kern-Funktionalität
+├── core/                 # Kern-Funktionalität
 │   ├── config.py         # Tool-Konfiguration
 │   └── simulation_config.py  # Simulation-Szenarien (NEU!)
 ├── resources/            # Externe Ressourcen (NEU!)
@@ -184,7 +194,8 @@ AI_BS/
 │   └── office_small.yaml
 ├── beispiele/            # Beispiel-Scripts
 ├── scripts/              # Utility-Scripts
-│   └── run_from_config.py  # YAML-Config-Runner (NEU!)
+│   ├── run_from_config.py      # YAML-Config-Runner (NEU!)
+│   └── YAML_SIMULATION_WORKFLOW.md  # Workflow-Doku (NEU!)
 └── tests/                # Tests
 ```
 
@@ -253,7 +264,14 @@ idf = generator.create_from_energieausweis(
 
 ## 📖 Dokumentation
 
-- [ERSTE_SCHRITTE.md](ERSTE_SCHRITTE.md) - Tutorial
+**Setup & Installation:**
+- [0_Setup/ERSTE_SCHRITTE.md](0_Setup/ERSTE_SCHRITTE.md) - Erste Schritte Tutorial
+
+**YAML-Workflow:**
+- [scripts/YAML_SIMULATION_WORKFLOW.md](scripts/YAML_SIMULATION_WORKFLOW.md) - Kompletter Workflow
+- [scenarios/README.md](scenarios/README.md) - YAML Config Schema
+
+**Projekt:**
 - [GitHub Issues](https://github.com/LUMA-94-X/AI_BS/issues) - Features & Roadmap
 
 ## 📄 Lizenz
