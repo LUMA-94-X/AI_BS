@@ -102,7 +102,9 @@ class HVACTemplateManager:
         idf: IDF,
         template_name: str = "ideal_loads",
         heating_setpoint: float = 20.0,
-        cooling_setpoint: float = 26.0
+        cooling_setpoint: float = 26.0,
+        heating_enabled: bool = True,
+        cooling_enabled: bool = True
     ) -> IDF:
         """Apply HVAC template to an IDF using simple ideal loads system.
 
@@ -114,6 +116,8 @@ class HVACTemplateManager:
             template_name: Name of template (currently only "ideal_loads" fully supported)
             heating_setpoint: Heating setpoint temperature in °C (default: 20.0)
             cooling_setpoint: Cooling setpoint temperature in °C (default: 26.0)
+            heating_enabled: Enable heating system (default: True)
+            cooling_enabled: Enable cooling system (default: True)
 
         Returns:
             Modified IDF object
@@ -121,11 +125,25 @@ class HVACTemplateManager:
         if template_name != "ideal_loads":
             print(f"⚠️  Template '{template_name}' not yet implemented. Using 'ideal_loads'.")
 
+        # Check if HVAC should be added at all
+        if not heating_enabled and not cooling_enabled:
+            print(f"\n⚠️  Both heating and cooling are disabled. No HVAC system will be added.")
+            return idf
+
         # Get all zones
         zones = idf.idfobjects.get('ZONE', [])
 
         if not zones:
             raise ValueError("No zones found in IDF. Cannot add HVAC system.")
+
+        # Adjust setpoints if heating/cooling is disabled
+        # Set extreme values so system never operates
+        if not heating_enabled:
+            heating_setpoint = -99.0
+            print(f"   ⚠️  Heating disabled - setting extreme heating setpoint: {heating_setpoint}°C")
+        if not cooling_enabled:
+            cooling_setpoint = 99.0
+            print(f"   ⚠️  Cooling disabled - setting extreme cooling setpoint: {cooling_setpoint}°C")
 
         print(f"\n🔧 Applying HVAC template '{template_name}' to {len(zones)} zones...")
 

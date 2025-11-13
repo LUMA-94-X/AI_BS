@@ -146,7 +146,7 @@ class BuildingModel(BaseModel):
             "num_floors": geo_solution.num_floors,
             "floor_height": geo_solution.floor_height,
             "floor_area": geo_solution.floor_area,
-            "total_floor_area": ea_data.nettoflaeche_m2,
+            "total_floor_area": ea_data.bruttoflaeche_m2,
             "volume": geo_solution.volume,
             "av_ratio": geo_solution.av_ratio,
             "aspect_ratio": geo_solution.aspect_ratio

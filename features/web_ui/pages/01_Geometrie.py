@@ -216,13 +216,13 @@ with tab2:
             help="Einfamilienhaus, Mehrfamilienhaus oder Nichtwohngebäude"
         )
 
-        nettoflaeche = st.number_input(
-            "Nettogrundfläche (m²) *",
+        bruttoflaeche = st.number_input(
+            "Bruttogrundfläche (m²) *",
             min_value=20.0,
             max_value=50000.0,
-            value=150.0,
+            value=165.0,
             step=10.0,
-            help="Konditionierte Nutzfläche (Pflichtfeld)"
+            help="Brutto-Grundfläche inkl. Wände (Pflichtfeld)"
         )
 
         st.markdown("#### 📐 Hüllflächen (optional)")
@@ -288,13 +288,66 @@ with tab2:
         st.markdown("#### 💨 Lüftung")
         luftwechsel = st.slider("Luftwechselrate (1/h)", min_value=0.0, max_value=3.0, value=0.5, step=0.1)
 
+        st.markdown("#### 📊 Energieausweis-Kennwerte")
+        st.caption("Optional - können automatisch berechnet werden")
+
+        use_kennwerte_input = st.checkbox("Kennwerte manuell eingeben", value=False, key="use_kennwerte")
+
+        if use_kennwerte_input:
+            brutto_volumen_input = st.number_input(
+                "Brutto-Volumen (m³)",
+                min_value=30.0,
+                max_value=500000.0,
+                value=500.0,
+                step=10.0,
+                help="Brutto-Volumen inkl. Wände"
+            )
+            kompaktheit_input = st.number_input(
+                "Kompaktheit A/V (m²/m³)",
+                min_value=0.1,
+                max_value=10.0,
+                value=1.0,
+                step=0.1,
+                help="Verhältnis Hüllfläche zu Volumen"
+            )
+            char_laenge_input = st.number_input(
+                "Charakteristische Länge (m)",
+                min_value=0.5,
+                max_value=50.0,
+                value=1.0,
+                step=0.1,
+                help="lc = V/A"
+            )
+            mittlerer_u_wert_input = st.number_input(
+                "Mittlerer U-Wert (W/m²K)",
+                min_value=0.1,
+                max_value=3.0,
+                value=0.5,
+                step=0.05,
+                help="Flächengewichteter mittlerer U-Wert"
+            )
+        else:
+            brutto_volumen_input = None
+            kompaktheit_input = None
+            char_laenge_input = None
+            mittlerer_u_wert_input = None
+
+        bauweise = st.selectbox(
+            "Bauweise",
+            options=["Massiv", "Leicht"],
+            index=0,
+            help="Bauweise des Gebäudes"
+        )
+
     # ========== SPALTE 3: VORSCHAU & GENERIERUNG ==========
     with col3:
         st.markdown("#### 🔍 Geometrie-Rekonstruktion")
 
         try:
+            from features.geometrie.models.energieausweis_input import Bauweise
+
             ea_input = EnergieausweisInput(
-                nettoflaeche_m2=nettoflaeche,
+                bruttoflaeche_m2=bruttoflaeche,
                 wandflaeche_m2=wandflaeche,
                 dachflaeche_m2=dachflaeche,
                 bodenflaeche_m2=bodenflaeche,
@@ -305,6 +358,11 @@ with tab2:
                 u_wert_boden=u_boden,
                 u_wert_fenster=u_fenster,
                 g_wert_fenster=g_wert,
+                brutto_volumen_m3=brutto_volumen_input,
+                kompaktheit=kompaktheit_input,
+                charakteristische_laenge_m=char_laenge_input,
+                mittlerer_u_wert=mittlerer_u_wert_input,
+                bauweise=Bauweise(bauweise),
                 fenster=fenster_data,
                 luftwechselrate_h=luftwechsel,
                 gebaeudetyp=GebaeudeTyp(gebaeudetyp),

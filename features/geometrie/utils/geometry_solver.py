@@ -180,11 +180,10 @@ class GeometrySolver:
         elif ea_data.bodenflaeche_m2 is not None:
             A_grundriss = ea_data.bodenflaeche_m2
         else:
-            # Schätze aus Nettofläche (Annahme: 85% Nutzungsgrad)
-            A_grundriss = (ea_data.nettoflaeche_m2 / ea_data.anzahl_geschosse) / 0.85
+            # Schätze aus Bruttofläche (bereits inkl. Wände)
+            A_grundriss = ea_data.bruttoflaeche_m2 / ea_data.anzahl_geschosse
             warnings.append(
-                f"Grundfläche geschätzt aus Nettofläche: {A_grundriss:.1f}m² "
-                f"(Annahme: 85% Nutzungsgrad)"
+                f"Grundfläche geschätzt aus Bruttofläche: {A_grundriss:.1f}m² pro Geschoss"
             )
 
         # 2. L, W aus AR
@@ -231,8 +230,8 @@ class GeometrySolver:
             f"Geschosshöhe angenommen: {ea_data.geschosshoehe_m:.1f}m"
         ]
 
-        # Grundfläche aus Nettofläche (85% Nutzungsgrad)
-        A_grundriss = (ea_data.nettoflaeche_m2 / ea_data.anzahl_geschosse) / 0.85
+        # Grundfläche aus Bruttofläche (bereits inkl. Wände)
+        A_grundriss = ea_data.bruttoflaeche_m2 / ea_data.anzahl_geschosse
 
         # L, W aus AR
         AR = ea_data.aspect_ratio_hint

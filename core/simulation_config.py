@@ -55,12 +55,12 @@ class EnergieausweisParams(BaseModel):
     Geometry will be reconstructed from envelope areas if provided.
     """
 
-    # ============ REQUIRED: U-Values and Net Floor Area ============
-    nettoflaeche_m2: float = Field(
+    # ============ REQUIRED: U-Values and Gross Floor Area ============
+    bruttoflaeche_m2: float = Field(
         ...,
         gt=10,
         lt=50000,
-        description="Net conditioned floor area [m²]"
+        description="Gross floor area incl. walls [m²]"
     )
 
     u_wert_wand: float = Field(..., gt=0.1, lt=3.0, description="Wall U-value [W/m²K]")

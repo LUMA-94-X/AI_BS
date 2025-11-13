@@ -334,6 +334,78 @@ try:
 
         st.success(f"**Ihr Gebäude:** {kennzahlen.energiekennzahl_kwh_m2a:.1f} kWh/m²a = Klasse **{kennzahlen.effizienzklasse}**")
 
+        # Austrian Energieausweis metrics
+        st.markdown("---")
+        st.markdown("### 🇦🇹 Energieausweis-Kennzahlen (Österreich)")
+
+        # Energiebedarfe
+        st.markdown("#### Energiebedarfe")
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("HWB", f"{kennzahlen.hwb_kwh_m2a:.1f} kWh/m²a", help="Heizwärmebedarf")
+
+        with col2:
+            wwwb_val = kennzahlen.wwwb_kwh_m2a if kennzahlen.wwwb_kwh_m2a is not None else "k.A."
+            st.metric("WWWB", f"{wwwb_val}", help="Warmwasserwärmebedarf (nicht verfügbar)")
+
+        with col3:
+            st.metric("EEB", f"{kennzahlen.eeb_kwh_m2a:.1f} kWh/m²a", help="Endenergiebedarf")
+
+        with col4:
+            peb_val = kennzahlen.peb_kwh_m2a if kennzahlen.peb_kwh_m2a is not None else "k.A."
+            st.metric("PEB", f"{peb_val}", help="Primärenergiebedarf (nicht verfügbar)")
+
+        col5, col6 = st.columns(2)
+
+        with col5:
+            heb_val = kennzahlen.heb_kwh_m2a if kennzahlen.heb_kwh_m2a is not None else "k.A."
+            st.metric("HEB", f"{heb_val}", help="Haushaltsenergiebedarf (nicht verfügbar)")
+
+        with col6:
+            co2_val = f"{kennzahlen.co2_kg_m2a:.1f} kg/m²a" if kennzahlen.co2_kg_m2a is not None else "k.A."
+            st.metric("CO₂", f"{co2_val}", help="CO₂-Emissionen (nicht verfügbar)")
+
+        # Wärmeverluste und -gewinne
+        st.markdown("")
+        st.markdown("#### Wärmebilanz")
+
+        col_verluste, col_gewinne = st.columns(2)
+
+        with col_verluste:
+            st.markdown("**Wärmeverluste**")
+            st.metric("QT - Transmissionswärmeverluste", f"{kennzahlen.transmissionswaermeverluste_kwh:.0f} kWh/a",
+                     help="Wärmeverluste durch die Gebäudehülle")
+            st.metric("QV - Lüftungswärmeverluste", f"{kennzahlen.lueftungswaermeverluste_kwh:.0f} kWh/a",
+                     help="Wärmeverluste durch Infiltration und Lüftung")
+
+        with col_gewinne:
+            st.markdown("**Wärmegewinne**")
+            st.metric("Solare Wärmegewinne", f"{kennzahlen.solare_waermegewinne_kwh:.0f} kWh/a",
+                     help="Wärmegewinne durch Sonneneinstrahlung über Fenster")
+            st.metric("Innere Wärmegewinne", f"{kennzahlen.innere_waermegewinne_kwh:.0f} kWh/a",
+                     help="Wärmegewinne durch Beleuchtung, Geräte und Personen")
+
+        # Lasten
+        st.markdown("")
+        st.markdown("#### Auslegungslasten")
+
+        col_heizlast, col_kuhllast = st.columns(2)
+
+        with col_heizlast:
+            st.metric("Heizlast", f"{kennzahlen.heizlast_w_m2:.1f} W/m²",
+                     help="Spezifische Heizlast für Dimensionierung der Heizung")
+
+        with col_kuhllast:
+            st.metric("Kühllast", f"{kennzahlen.kuhllast_w_m2:.1f} W/m²",
+                     help="Spezifische Kühllast für Dimensionierung der Kühlung")
+
+        st.info("""
+        **Hinweis:** Kennzahlen mit "k.A." (keine Angabe) sind in der aktuellen Simulation nicht verfügbar,
+        da dafür zusätzliche Systemkomponenten (z.B. Warmwasserbereitung) oder Konfigurationen
+        (z.B. Primärenergiefaktoren, Emissionsfaktoren) erforderlich wären.
+        """)
+
         # Tipps
         with st.expander("💡 Tipps zur Verbesserung der Energieeffizienz"):
             st.markdown("""

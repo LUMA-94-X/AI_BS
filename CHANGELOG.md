@@ -6,6 +6,69 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ## [Unreleased]
 
+### Added - 2025-11-13
+
+#### 🇦🇹 Energieausweis-Erweiterung: Österreichische Kennzahlen
+- **Input-Anpassungen** (Energieausweis-Variante):
+  - `Nettogrundfläche` → `Bruttogrundfläche` (inkl. Wände)
+  - Neue optionale Kennwerte: Brutto-Volumen, Kompaktheit (A/V), Charakteristische Länge (lc)
+  - Mittlerer U-Wert (flächengewichtet, mit Auto-Berechnung)
+  - Bauweise-Auswahl (Massiv/Leicht)
+
+- **Output-Kennzahlen** (Österreichischer Energieausweis):
+  - **Energiebedarfe**: HWB, WWWB (k.A.), EEB, HEB (k.A.), PEB (k.A.), CO² (k.A.)
+  - **Wärmebilanz**: QT (Transmissionswärmeverluste), QV (Lüftungswärmeverluste)
+  - **Wärmegewinne**: Solare Gewinne, Innere Gewinne (Lights + Equipment + People)
+  - **Auslegungslasten**: Heizlast, Kühllast
+  - Nicht verfügbare Kennzahlen werden als "k.A." angezeigt mit Erklärung
+
+- **HVAC-Steuerung**:
+  - Checkboxen zum Aktivieren/Deaktivieren von Heizung und Kühlung
+  - UI-Integration in HVAC-Einstellungen
+
+- **Neue EnergyPlus Output-Variablen**:
+  - `Zone Ideal Loads Zone Total Heating/Cooling Rate` (Lastspitzen)
+  - `Surface Average Face Conduction Heat Transfer Energy` (QT)
+  - `Zone Infiltration/Ventilation Sensible Heat Gain Energy` (QV)
+  - `Zone Windows Total Heat Gain Energy` (Solar)
+  - `Zone Lights/Equipment/People Total Heating Energy` (Intern)
+
+- **Ergebnisse-Anzeige**:
+  - Neue Sektion "🇦🇹 Energieausweis-Kennzahlen (Österreich)" in Tab "Energetische Auswertung"
+  - Strukturierte Darstellung: Energiebedarfe, Wärmebilanz, Auslegungslasten
+  - Tooltips mit Erklärungen zu allen Kennzahlen
+
+### Fixed - 2025-11-13
+
+#### ⚡ Heizlast/Kühllast zeigen jetzt korrekte Werte
+- **Problem**: Heizlast/Kühllast waren immer 0
+- **Ursache**: Falsche EnergyPlus Output-Variablen für Ideal Loads System
+- **Fix**:
+  - Alt: `"Zone Air System Sensible Heating/Cooling Rate"`
+  - Neu: `"Zone Ideal Loads Zone Total Heating/Cooling Rate"`
+- Heiz-/Kühllasten werden jetzt korrekt aus der Simulation ausgelesen
+
+### Changed - 2025-11-13
+
+#### 🔄 Datenmodell-Anpassungen
+- `EnergieausweisInput.nettoflaeche_m2` → `bruttoflaeche_m2`
+- `GeometrySolver` verwendet Bruttofläche für Berechnungen
+- `SimulationConfig.EnergieausweisParams` aktualisiert
+- 10 Dateien aktualisiert für Konsistenz
+
+#### 📊 Geometrie-Metriken erweitert
+- Anzeige von Brutto-Volumen, Charakteristische Länge, Kompaktheit
+- Mittlerer U-Wert in erweiterten Kennzahlen
+- Bauweise-Anzeige
+
+### Known Issues - 2025-11-13
+
+⚠️ **Siehe Issue #7**:
+1. **Bug**: HVAC Kühlung-Deaktivierung funktioniert nicht (Simulation läuft trotzdem mit Kühlung)
+2. **UI**: Layout-Optimierung erforderlich (zu viele neue Eingabefelder, überladen)
+
+---
+
 ### Added - 2025-01-12
 
 #### 🎨 Ergebnisse-Seite: Tab-Struktur implementiert

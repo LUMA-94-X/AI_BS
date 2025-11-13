@@ -103,37 +103,53 @@ if hvac_type == "Ideal Loads Air System":
     col1, col2 = st.columns(2)
 
     with col1:
+        heating_enabled = st.checkbox(
+            "Heizung aktivieren",
+            value=True,
+            help="Heizung ein- oder ausschalten"
+        )
+
         heating_setpoint = st.slider(
             "Heiz-Solltemperatur (°C)",
             min_value=15.0,
             max_value=25.0,
             value=20.0,
             step=0.5,
-            help="Zieltemperatur für die Heizung"
+            help="Zieltemperatur für die Heizung",
+            disabled=not heating_enabled
         )
 
         heating_limit = st.selectbox(
             "Heizleistungs-Limit",
             options=["Unbegrenzt", "Begrenzt"],
             index=0,
-            help="Begrenzung der maximalen Heizleistung"
+            help="Begrenzung der maximalen Heizleistung",
+            disabled=not heating_enabled
         )
 
     with col2:
+        cooling_enabled = st.checkbox(
+            "Kühlung aktivieren",
+            value=True,
+            help="Kühlung ein- oder ausschalten"
+        )
+
         cooling_setpoint = st.slider(
             "Kühl-Solltemperatur (°C)",
             min_value=20.0,
             max_value=30.0,
             value=26.0,
             step=0.5,
-            help="Zieltemperatur für die Kühlung"
+            help="Zieltemperatur für die Kühlung",
+            disabled=not cooling_enabled
         )
 
         cooling_limit = st.selectbox(
             "Kühlleistungs-Limit",
             options=["Unbegrenzt", "Begrenzt"],
             index=0,
-            help="Begrenzung der maximalen Kühlleistung"
+            help="Begrenzung der maximalen Kühlleistung",
+            disabled=not cooling_enabled
         )
 
     # Luftwechsel
@@ -161,6 +177,8 @@ if hvac_type == "Ideal Loads Air System":
     # Speichere HVAC-Konfiguration
     st.session_state['hvac_config'] = {
         'type': hvac_type,
+        'heating_enabled': heating_enabled,
+        'cooling_enabled': cooling_enabled,
         'heating_setpoint': heating_setpoint,
         'cooling_setpoint': cooling_setpoint,
         'heating_limit': heating_limit,

@@ -1,7 +1,7 @@
 """Datenmodelle für Energieausweis-basierte Geometrie-Generierung."""
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -11,6 +11,13 @@ class GebaeudeTyp(str, Enum):
     EFH = "EFH"  # Einfamilienhaus
     MFH = "MFH"  # Mehrfamilienhaus
     NWG = "NWG"  # Nichtwohngebäude (Office, Retail, etc.)
+
+
+class Bauweise(str, Enum):
+    """Bauweise des Gebäudes."""
+
+    MASSIV = "Massiv"  # Massivbau (Ziegel, Beton)
+    LEICHT = "Leicht"  # Leichtbau (Holz, Fertighaus)
 
 
 class FensterData(BaseModel):
@@ -65,11 +72,11 @@ class EnergieausweisInput(BaseModel):
     """Vollständige Eingabedaten aus Energieausweis für 5-Zone-Modell."""
 
     # ============ PFLICHTFELDER ============
-    nettoflaeche_m2: float = Field(
+    bruttoflaeche_m2: float = Field(
         ...,
         gt=10,
         lt=50000,
-        description="Netto-Grundfläche / konditionierte Fläche [m²]"
+        description="Brutto-Grundfläche (inkl. Wände) [m²]"
     )
 
     u_wert_wand: float = Field(
@@ -98,6 +105,40 @@ class EnergieausweisInput(BaseModel):
         gt=0.5,
         lt=6.0,
         description="U-Wert Fenster [W/m²K]"
+    )
+
+    # ============ ENERGIEAUSWEIS KENNWERTE (optional) ============
+    brutto_volumen_m3: Optional[float] = Field(
+        default=None,
+        gt=30,
+        lt=500000,
+        description="Brutto-Volumen (inkl. Wände) [m³]"
+    )
+
+    kompaktheit: Optional[float] = Field(
+        default=None,
+        gt=0.1,
+        lt=10.0,
+        description="Kompaktheit A/V [m²/m³] - wird berechnet wenn nicht angegeben"
+    )
+
+    charakteristische_laenge_m: Optional[float] = Field(
+        default=None,
+        gt=0.5,
+        lt=50.0,
+        description="Charakteristische Länge lc = V/A [m] - wird berechnet wenn nicht angegeben"
+    )
+
+    mittlerer_u_wert: Optional[float] = Field(
+        default=None,
+        gt=0.1,
+        lt=3.0,
+        description="Mittlerer U-Wert (flächengewichtet) [W/m²K] - wird berechnet wenn nicht angegeben"
+    )
+
+    bauweise: Bauweise = Field(
+        default=Bauweise.MASSIV,
+        description="Bauweise des Gebäudes"
     )
 
     # ============ GEOMETRIE (optional für Rückrechnung) ============
@@ -199,8 +240,8 @@ class EnergieausweisInput(BaseModel):
                     f"Bei Flachdach sollten diese ähnlich sein."
                 )
 
-        # Nettofläche sollte zu Anzahl Geschosse passen
-        grundflaeche_approx = self.nettoflaeche_m2 / self.anzahl_geschosse
+        # Bruttofläche sollte zu Anzahl Geschosse passen
+        grundflaeche_approx = self.bruttoflaeche_m2 / self.anzahl_geschosse
         if grundflaeche_approx < 20:
             raise ValueError(
                 f"Grundfläche pro Geschoss ({grundflaeche_approx:.1f}m²) sehr klein. "
@@ -209,12 +250,12 @@ class EnergieausweisInput(BaseModel):
 
         # Falls Bodenfläche gegeben, Plausibilität prüfen
         if self.bodenflaeche_m2 is not None:
-            grundflaeche_netto = self.nettoflaeche_m2 / self.anzahl_geschosse
-            # Nettofläche ist ca. 80-90% der Bruttofläche
-            if self.bodenflaeche_m2 < grundflaeche_netto * 0.7:
+            grundflaeche_brutto = self.bruttoflaeche_m2 / self.anzahl_geschosse
+            # Bodenfläche sollte ähnlich zur Bruttofläche pro Geschoss sein
+            if self.bodenflaeche_m2 < grundflaeche_brutto * 0.6:
                 raise ValueError(
                     f"Bodenfläche ({self.bodenflaeche_m2:.1f}m²) zu klein für "
-                    f"Nettofläche ({grundflaeche_netto:.1f}m² pro Geschoss)"
+                    f"Bruttofläche ({grundflaeche_brutto:.1f}m² pro Geschoss)"
                 )
 
         return self
@@ -231,7 +272,7 @@ class EnergieausweisInput(BaseModel):
                 wand = self.wandflaeche_m2
             else:
                 # Grobe Schätzung: Umfang × Höhe
-                grundflaeche = self.nettoflaeche_m2 / self.anzahl_geschosse
+                grundflaeche = self.bruttoflaeche_m2 / self.anzahl_geschosse
                 umfang_approx = 4 * (grundflaeche ** 0.5)  # Für quadratisches Gebäude
                 wand = umfang_approx * (self.anzahl_geschosse * self.geschosshoehe_m)
 
@@ -267,13 +308,51 @@ class EnergieausweisInput(BaseModel):
             return self.infiltration_ach50 / 20.0
         return self.luftwechselrate_h * 0.1  # Annahme: 10% der Lüftung ist Infiltration
 
+    def berechne_mittleren_u_wert(self) -> Optional[float]:
+        """
+        Berechnet flächengewichteten mittleren U-Wert.
+
+        Formel: U_m = (A_wand * U_wand + A_dach * U_dach + A_boden * U_boden + A_fenster * U_fenster) / A_gesamt
+
+        Returns:
+            Mittlerer U-Wert [W/m²K] oder None wenn Flächenangaben fehlen
+        """
+        if not self.has_complete_envelope_data:
+            return None
+
+        # Fensterfläche
+        if self.fenster.has_exact_areas:
+            a_fenster = self.fenster.total_fenster_m2
+        else:
+            # Schätzung basierend auf WWR und Wandfläche
+            a_fenster = self.wandflaeche_m2 * self.fenster.window_wall_ratio if self.wandflaeche_m2 else 0
+
+        # Opake Wandfläche (ohne Fenster)
+        a_wand_opak = self.wandflaeche_m2 - a_fenster if self.wandflaeche_m2 else 0
+
+        # Gesamtfläche Hüllfläche
+        a_gesamt = a_wand_opak + self.dachflaeche_m2 + self.bodenflaeche_m2 + a_fenster
+
+        if a_gesamt == 0:
+            return None
+
+        # Flächengewichteter U-Wert
+        u_mittel = (
+            a_wand_opak * self.u_wert_wand +
+            self.dachflaeche_m2 * self.u_wert_dach +
+            self.bodenflaeche_m2 * self.u_wert_boden +
+            a_fenster * self.u_wert_fenster
+        ) / a_gesamt
+
+        return round(u_mittel, 3)
+
 
 # ============ BEISPIEL-INSTANZEN ============
 
 def create_example_efh() -> EnergieausweisInput:
     """Beispiel: Typisches Einfamilienhaus Baujahr 2010."""
     return EnergieausweisInput(
-        nettoflaeche_m2=150.0,
+        bruttoflaeche_m2=165.0,  # ca. 10% mehr als Nettofläche 150m²
         wandflaeche_m2=240.0,
         dachflaeche_m2=80.0,
         bodenflaeche_m2=80.0,
@@ -284,6 +363,7 @@ def create_example_efh() -> EnergieausweisInput:
         u_wert_boden=0.35,
         u_wert_fenster=1.3,
         g_wert_fenster=0.6,
+        bauweise=Bauweise.MASSIV,
         fenster=FensterData(
             nord_m2=8.0,
             ost_m2=12.0,
@@ -300,7 +380,7 @@ def create_example_efh() -> EnergieausweisInput:
 def create_example_mfh() -> EnergieausweisInput:
     """Beispiel: Mehrfamilienhaus Baujahr 1980, saniert."""
     return EnergieausweisInput(
-        nettoflaeche_m2=800.0,
+        bruttoflaeche_m2=880.0,  # ca. 10% mehr als Nettofläche 800m²
         wandflaeche_m2=950.0,
         dachflaeche_m2=280.0,
         bodenflaeche_m2=280.0,
@@ -311,6 +391,7 @@ def create_example_mfh() -> EnergieausweisInput:
         u_wert_boden=0.45,
         u_wert_fenster=1.5,
         g_wert_fenster=0.65,
+        bauweise=Bauweise.MASSIV,
         fenster=FensterData(
             nord_m2=40.0,
             ost_m2=55.0,

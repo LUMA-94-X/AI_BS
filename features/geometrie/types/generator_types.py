@@ -178,11 +178,32 @@ class OutputConfig:
     def standard_outputs(cls) -> 'OutputConfig':
         """Erstellt Standard-Output-Konfiguration."""
         return cls(variables=[
+            # Basic temperature and energy
             OutputVariable("*", "Zone Mean Air Temperature", "Hourly"),
             OutputVariable("*", "Zone Air System Sensible Heating Energy", "Hourly"),
             OutputVariable("*", "Zone Air System Sensible Cooling Energy", "Hourly"),
             OutputVariable("*", "Zone Lights Electric Energy", "Hourly"),
             OutputVariable("*", "Zone Electric Equipment Electric Energy", "Hourly"),
+
+            # Heating/Cooling loads (peak values) - Fixed for Ideal Loads
+            OutputVariable("*", "Zone Ideal Loads Zone Total Heating Rate", "Hourly"),
+            OutputVariable("*", "Zone Ideal Loads Zone Total Cooling Rate", "Hourly"),
+
+            # Austrian Energieausweis metrics
+            # Transmission heat losses (QT)
+            OutputVariable("*", "Surface Average Face Conduction Heat Transfer Energy", "Hourly"),
+
+            # Ventilation heat losses (QV)
+            OutputVariable("*", "Zone Infiltration Sensible Heat Gain Energy", "Hourly"),
+            OutputVariable("*", "Zone Ventilation Sensible Heat Gain Energy", "Hourly"),
+
+            # Solar heat gains
+            OutputVariable("*", "Zone Windows Total Heat Gain Energy", "Hourly"),
+
+            # Internal heat gains
+            OutputVariable("*", "Zone Lights Total Heating Energy", "Hourly"),
+            OutputVariable("*", "Zone Electric Equipment Total Heating Energy", "Hourly"),
+            OutputVariable("*", "Zone People Total Heating Energy", "Hourly"),
         ])
 
     @classmethod

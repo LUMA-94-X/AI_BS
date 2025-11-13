@@ -79,7 +79,7 @@ def validate_config(config: SimulationConfig) -> None:
         # Energieausweis workflow
         ea = config.building.energieausweis
         logger.info(f"  ✓ Building type: {ea.gebaeudetyp}")
-        logger.info(f"  ✓ Net floor area: {ea.nettoflaeche_m2:.1f} m²")
+        logger.info(f"  ✓ Gross floor area: {ea.bruttoflaeche_m2:.1f} m²")
         logger.info(f"  ✓ Floors: {ea.anzahl_geschosse}")
         logger.info(f"  ✓ U-values: Wall={ea.u_wert_wand} / Roof={ea.u_wert_dach} / Window={ea.u_wert_fenster}")
 
@@ -151,7 +151,7 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
 
         # Reconstruct EnergieausweisInput
         ea_input = EnergieausweisInput(
-            nettoflaeche_m2=ea_params.nettoflaeche_m2,
+            bruttoflaeche_m2=ea_params.bruttoflaeche_m2,
             u_wert_wand=ea_params.u_wert_wand,
             u_wert_dach=ea_params.u_wert_dach,
             u_wert_boden=ea_params.u_wert_boden,
@@ -171,7 +171,7 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
         )
 
         logger.info(f"  Building type: {ea_input.gebaeudetyp.value}")
-        logger.info(f"  Net floor area: {ea_input.nettoflaeche_m2:.1f} m²")
+        logger.info(f"  Gross floor area: {ea_input.bruttoflaeche_m2:.1f} m²")
         logger.info(f"  U-values: Wall={ea_input.u_wert_wand} / Roof={ea_input.u_wert_dach} / Window={ea_input.u_wert_fenster}")
 
         # Generate 5-Zone IDF
@@ -409,8 +409,8 @@ def main() -> int:
 
         # Calculate and display results
         if config.building.source == "energieausweis":
-            # Use nettoflaeche_m2 from Energieausweis
-            floor_area = config.building.energieausweis.nettoflaeche_m2
+            # Use bruttoflaeche_m2 from Energieausweis
+            floor_area = config.building.energieausweis.bruttoflaeche_m2
         else:
             # Calculate from geometry
             floor_area = (

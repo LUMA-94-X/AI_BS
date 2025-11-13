@@ -60,10 +60,10 @@ def display_geometry_metrics(
         st.markdown("#### 🏗️ Flächen & Volumen")
         col4, col5 = st.columns(2)
         with col4:
-            st.metric("Grundfläche", f"{floor_area:.0f} m²")
-            st.metric("Nettogrundfläche", f"{total_floor_area:.0f} m²")
+            st.metric("Grundfläche pro Geschoss", f"{floor_area:.0f} m²")
+            st.metric("Bruttogrundfläche gesamt", f"{total_floor_area:.0f} m²")
         with col5:
-            st.metric("Volumen", f"{volume:.0f} m³")
+            st.metric("Brutto-Volumen", f"{volume:.0f} m³")
             st.metric("Wandfläche", f"{wall_area:.0f} m²")
 
         # Geschosse
@@ -92,18 +92,45 @@ def display_geometry_metrics(
                     st.metric("Fensterflächenanteil", f"{wwr_calc * 100:.0f}%")
 
         # Erweiterte Metriken
-        if show_advanced and av_ratio is not None:
+        if show_advanced:
             st.markdown("#### 📈 Erweiterte Kennzahlen")
-            col10, col11 = st.columns(2)
-            with col10:
-                st.metric(
-                    "A/V-Verhältnis",
-                    f"{av_ratio:.2f}",
-                    help="Verhältnis von Außenfläche zu Volumen - Niedrigere Werte = kompaktere Gebäude"
-                )
-            with col11:
-                kompaktheit = "Sehr kompakt" if av_ratio < 0.5 else "Kompakt" if av_ratio < 0.8 else "Normal" if av_ratio < 1.2 else "Wenig kompakt"
-                st.metric("Kompaktheit", kompaktheit)
+
+            # Kompaktheit (A/V und lc)
+            if av_ratio is not None:
+                col10, col11, col12 = st.columns(3)
+                with col10:
+                    st.metric(
+                        "A/V-Verhältnis",
+                        f"{av_ratio:.3f} m²/m³",
+                        help="Verhältnis von Hüllfläche zu Volumen - Niedrigere Werte = kompaktere Gebäude"
+                    )
+                with col11:
+                    char_length = 1.0 / av_ratio if av_ratio > 0 else 0
+                    st.metric(
+                        "Charakteristische Länge",
+                        f"{char_length:.2f} m",
+                        help="lc = V/A - Höhere Werte = kompaktere Gebäude"
+                    )
+                with col12:
+                    kompaktheit = "Sehr kompakt" if av_ratio < 0.5 else "Kompakt" if av_ratio < 0.8 else "Normal" if av_ratio < 1.2 else "Wenig kompakt"
+                    st.metric("Kompaktheit", kompaktheit)
+
+            # Mittlerer U-Wert und Bauweise (falls vorhanden)
+            mittlerer_u_wert = geo_data.get('mittlerer_u_wert')
+            bauweise = geo_data.get('bauweise')
+
+            if mittlerer_u_wert is not None or bauweise is not None:
+                col13, col14 = st.columns(2)
+                if mittlerer_u_wert is not None:
+                    with col13:
+                        st.metric(
+                            "Mittlerer U-Wert",
+                            f"{mittlerer_u_wert:.2f} W/m²K",
+                            help="Flächengewichteter mittlerer U-Wert der Gebäudehülle"
+                        )
+                if bauweise is not None:
+                    with col14:
+                        st.metric("Bauweise", bauweise)
 
     except KeyError as e:
         st.error(f"❌ Fehlende Daten für Kennzahlen: {e}")

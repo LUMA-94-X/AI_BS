@@ -93,7 +93,7 @@ def build_simulation_config_from_ui(session_state: Dict[str, Any]) -> Simulation
 
         # Build EnergieausweisParams
         ea_params = EnergieausweisParams(
-            nettoflaeche_m2=ea_data.get('nettoflaeche_m2'),
+            bruttoflaeche_m2=ea_data.get('bruttoflaeche_m2'),
             u_wert_wand=ea_data.get('u_wert_wand'),
             u_wert_dach=ea_data.get('u_wert_dach'),
             u_wert_boden=ea_data.get('u_wert_boden'),

@@ -24,6 +24,12 @@ class ErgebnisUebersicht:
     min_raumtemperatur_c: float
     max_raumtemperatur_c: float
 
+    # Austrian Energieausweis metrics
+    transmissionswaermeverluste_kwh: float = 0.0
+    lueftungswaermeverluste_kwh: float = 0.0
+    solare_waermegewinne_kwh: float = 0.0
+    innere_waermegewinne_kwh: float = 0.0
+
 
 class EnergyPlusSQLParser:
     """Parser for EnergyPlus SQL output files."""
@@ -61,11 +67,31 @@ class EnergyPlusSQLParser:
         gesamtenergie = heizbedarf + kuehlbedarf + beleuchtung + geraete
 
         # Spitzenlasten in kW
-        spitzenlast_heizung = self._get_peak_value("Zone Air System Sensible Heating Rate") / 1000  # W to kW
-        spitzenlast_kuehlung = self._get_peak_value("Zone Air System Sensible Cooling Rate") / 1000
+        # Note: Using "Zone Ideal Loads" variables which work with HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM
+        spitzenlast_heizung = self._get_peak_value("Zone Ideal Loads Zone Total Heating Rate") / 1000  # W to kW
+        spitzenlast_kuehlung = self._get_peak_value("Zone Ideal Loads Zone Total Cooling Rate") / 1000
 
         # Temperaturen
         temp_data = self._get_temperature_stats()
+
+        # Austrian Energieausweis metrics
+        # Transmission heat losses (QT) - negative values indicate heat loss
+        transmissions_verluste = abs(self._get_annual_value("Surface Average Face Conduction Heat Transfer Energy")) / 3.6e6  # J to kWh
+
+        # Ventilation heat losses (QV) - infiltration + ventilation
+        infiltration_gain = self._get_annual_value("Zone Infiltration Sensible Heat Gain Energy") / 3.6e6
+        ventilation_gain = self._get_annual_value("Zone Ventilation Sensible Heat Gain Energy") / 3.6e6
+        # Negative gain = heat loss
+        lueftungs_verluste = abs(min(0, infiltration_gain)) + abs(min(0, ventilation_gain))
+
+        # Solar heat gains (from windows)
+        solar_gewinne = max(0, self._get_annual_value("Zone Windows Total Heat Gain Energy") / 3.6e6)
+
+        # Internal heat gains (lights + equipment + people)
+        lights_heating = self._get_annual_value("Zone Lights Total Heating Energy") / 3.6e6
+        equipment_heating = self._get_annual_value("Zone Electric Equipment Total Heating Energy") / 3.6e6
+        people_heating = self._get_annual_value("Zone People Total Heating Energy") / 3.6e6
+        innere_gewinne = lights_heating + equipment_heating + people_heating
 
         return ErgebnisUebersicht(
             gesamtenergiebedarf_kwh=gesamtenergie,
@@ -78,6 +104,10 @@ class EnergyPlusSQLParser:
             mittlere_raumtemperatur_c=temp_data['mean'],
             min_raumtemperatur_c=temp_data['min'],
             max_raumtemperatur_c=temp_data['max'],
+            transmissionswaermeverluste_kwh=transmissions_verluste,
+            lueftungswaermeverluste_kwh=lueftungs_verluste,
+            solare_waermegewinne_kwh=solar_gewinne,
+            innere_waermegewinne_kwh=innere_gewinne,
         )
 
     def _get_annual_value(self, variable_name: str) -> float:

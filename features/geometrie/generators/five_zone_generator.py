@@ -128,7 +128,8 @@ class FiveZoneGenerator:
             self._add_infiltration(idf, layouts, ea_data.effective_infiltration)
 
         # 10.5 HVAC System (IdealLoads)
-        self._add_hvac_system(idf)
+        hvac_config = sim_settings.get('hvac_config', {}) if sim_settings else {}
+        self._add_hvac_system(idf, hvac_config)
 
         # 11. Output Variables (with user settings)
         self._add_output_variables(idf, sim_settings)
@@ -228,7 +229,8 @@ class FiveZoneGenerator:
             self._add_infiltration(idf, layouts, ea_data.effective_infiltration)
 
         # 10.5 HVAC System (IdealLoads)
-        self._add_hvac_system(idf)
+        hvac_config = sim_settings.get('hvac_config', {}) if sim_settings else {}
+        self._add_hvac_system(idf, hvac_config)
 
         # 11. Output Variables (with user settings)
         self._add_output_variables(idf, sim_settings)
@@ -506,14 +508,31 @@ class FiveZoneGenerator:
     # HVAC SYSTEM
     # ========================================================================
 
-    def _add_hvac_system(self, idf: IDF) -> None:
+    def _add_hvac_system(self, idf: IDF, hvac_config: Optional[dict] = None) -> None:
         """Fügt IdealLoads HVAC System zu allen Zonen hinzu."""
         from features.hvac.ideal_loads import HVACTemplateManager
 
         manager = HVACTemplateManager()
+
+        # Extract HVAC settings
+        if hvac_config is None:
+            hvac_config = {}
+
+        heating_setpoint = hvac_config.get('heating_setpoint', 20.0)
+        cooling_setpoint = hvac_config.get('cooling_setpoint', 26.0)
+        heating_enabled = hvac_config.get('heating_enabled', True)
+        cooling_enabled = hvac_config.get('cooling_enabled', True)
+
         # Apply ideal loads HVAC template to all zones
         # Note: This modifies the IDF in-place, no need to reassign
-        manager.apply_template_simple(idf, template_name="ideal_loads")
+        manager.apply_template_simple(
+            idf,
+            template_name="ideal_loads",
+            heating_setpoint=heating_setpoint,
+            cooling_setpoint=cooling_setpoint,
+            heating_enabled=heating_enabled,
+            cooling_enabled=cooling_enabled
+        )
 
     # ========================================================================
     # OUTPUT VARIABLES

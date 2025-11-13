@@ -28,9 +28,23 @@ class GebaeudeKennzahlen:
     effizienzklasse: str            # Nach Energieeinsparverordnung: A+, A, B, C, etc.
     bewertung: str                  # Textuelle Bewertung
 
-    # Rohdaten
+    # Rohdaten (ohne Defaults müssen vor Feldern mit Defaults stehen)
     gesamtflaeche_m2: float
     ergebnisse: ErgebnisUebersicht
+
+    # Austrian Energieausweis metrics (in kWh/m²a)
+    hwb_kwh_m2a: float = 0.0  # Heizwärmebedarf (= heizkennzahl)
+    wwwb_kwh_m2a: Optional[float] = None  # Warmwasserwärmebedarf (not available)
+    eeb_kwh_m2a: float = 0.0  # Endenergiebedarf (= energiekennzahl)
+    heb_kwh_m2a: Optional[float] = None  # Haushaltsenergiebedarf (not available)
+    peb_kwh_m2a: Optional[float] = None  # Primärenergiebedarf (not available)
+    co2_kg_m2a: Optional[float] = None  # CO2-Emissionen (not available)
+
+    # Heat losses and gains (in kWh/a absolute values)
+    transmissionswaermeverluste_kwh: float = 0.0  # QT
+    lueftungswaermeverluste_kwh: float = 0.0  # QV
+    solare_waermegewinne_kwh: float = 0.0  # Solar gains
+    innere_waermegewinne_kwh: float = 0.0  # Internal gains
 
 
 class KennzahlenRechner:
@@ -114,8 +128,21 @@ class KennzahlenRechner:
             thermische_behaglichkeit=behaglichkeit,
             effizienzklasse=effizienzklasse,
             bewertung=bewertung,
+            # Rohdaten (müssen vor optionalen Feldern stehen)
             gesamtflaeche_m2=self.nettoflaeche_m2,
             ergebnisse=ergebnisse,
+            # Austrian Energieausweis metrics (specific values per m²a)
+            hwb_kwh_m2a=heizkennzahl,  # Same as heizkennzahl
+            wwwb_kwh_m2a=None,  # Not available (no hot water system)
+            eeb_kwh_m2a=energiekennzahl,  # Same as energiekennzahl
+            heb_kwh_m2a=None,  # Not available (household energy not separated)
+            peb_kwh_m2a=None,  # Not available (no primary energy factors configured)
+            co2_kg_m2a=None,  # Not available (no emission factors configured)
+            # Heat losses and gains (absolute values in kWh/a)
+            transmissionswaermeverluste_kwh=ergebnisse.transmissionswaermeverluste_kwh,
+            lueftungswaermeverluste_kwh=ergebnisse.lueftungswaermeverluste_kwh,
+            solare_waermegewinne_kwh=ergebnisse.solare_waermegewinne_kwh,
+            innere_waermegewinne_kwh=ergebnisse.innere_waermegewinne_kwh,
         )
 
     def _bestimme_effizienzklasse(self, energiekennzahl: float) -> str:
