@@ -22,14 +22,14 @@ from features.geometrie.utils.fenster_distribution import (
 )
 from features.internal_loads.native_loads import NativeInternalLoadsManager
 
-# NEW: Import refactored modules
-from .modules import (
+# NEW: Import refactored components
+from .components import (
     EppyBugFixer,
     MetadataGenerator,
     ZoneGenerator,
     MaterialsGenerator
 )
-from .models import MetadataConfig, ZoneInfo
+from features.geometrie.types import MetadataConfig, ZoneInfo
 
 
 class FiveZoneGenerator:

@@ -12,7 +12,7 @@ Dieses Modul erstellt alle Gebäude-Metadaten und Simulations-Einstellungen:
 
 from typing import Any, List, Tuple
 
-from ..models import MetadataConfig, OutputConfig, LocationData
+from features.geometrie.types import MetadataConfig, OutputConfig, LocationData
 
 
 class MetadataGenerator:

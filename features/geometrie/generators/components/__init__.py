@@ -1,7 +1,7 @@
-"""Generator Modules für FiveZoneGenerator.
+"""Generator Components für FiveZoneGenerator.
 
-Dieses Package enthält die modularisierten Komponenten des FiveZoneGenerators.
-Jedes Modul ist für einen spezifischen Aspekt der IDF-Generierung zuständig.
+Dieses Package enthält wiederverwendbare Komponenten für IDF-Generierung.
+Komponenten können von verschiedenen Generator-Typen genutzt werden.
 """
 
 from .eppy_workarounds import EppyBugFixer

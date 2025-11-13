@@ -6,7 +6,7 @@ Jede Zone repräsentiert einen thermisch gekoppelten Raum im Gebäude.
 
 from typing import Any, Dict, List
 
-from ..models import ZoneInfo, create_zone_info_from_idf_object
+from features.geometrie.types import ZoneInfo, create_zone_info_from_idf_object
 
 
 class ZoneGenerator:

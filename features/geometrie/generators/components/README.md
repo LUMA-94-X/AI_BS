@@ -1,6 +1,8 @@
-# FiveZoneGenerator Modules
+# Generator Components
 
-Diese Verzeichnis enthält die modularisierten Komponenten des FiveZoneGenerators.
+Wiederverwendbare Bausteine für IDF-Generatoren.
+
+Diese Komponenten sind **nicht** spezifisch für FiveZoneGenerator und können von verschiedenen Generator-Typen verwendet werden.
 
 ## Architektur-Übersicht
 
