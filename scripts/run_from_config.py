@@ -110,11 +110,11 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
     logger.info(f"  Building: {geometry.length}m × {geometry.width}m × {geometry.height}m")
     logger.info(f"  Floor area: {geometry.total_floor_area:.1f} m²")
 
-    # Generate IDF
+    # Generate IDF (don't save yet - we'll add HVAC first!)
     generator = SimpleBoxGenerator()
-    idf = generator.create_model(geometry, output_path)
+    idf = generator.create_model(geometry, idf_path=None)  # Don't save yet!
 
-    logger.info(f"  ✓ IDF created: {output_path.name}")
+    logger.info(f"  ✓ IDF created (in memory)")
 
     # Add HVAC system
     if config.hvac.system_type == "ideal_loads":
@@ -129,7 +129,7 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
         logger.info(f"  Cooling setpoint: {hvac_params.cooling_setpoint}°C")
         logger.info("  ✓ HVAC system added")
 
-    # Save IDF
+    # NOW save the complete IDF (geometry + HVAC)
     idf.save(str(output_path))
     logger.info(f"  ✓ IDF saved: {output_path}")
 
