@@ -420,14 +420,14 @@ print(f"Süd-WWR: {orientation_wwr.south:.0%}")  # z.B. 45%
 
 ```
 generators/
-├── five_zone_generator.py      # Hauptgenerator (Orchestrator)
+├── five_zone_generator.py      # Hauptgenerator (Orchestrator, ~520 Zeilen)
 │
 └── components/                  # Wiederverwendbare Bausteine
     ├── eppy_workarounds.py      # EppyBugFixer
     ├── metadata.py              # MetadataGenerator
     ├── zones.py                 # ZoneGenerator
     ├── materials.py             # MaterialsGenerator
-    └── surfaces.py              # SurfaceGenerator (Phase 3)
+    └── surfaces.py              # SurfaceGenerator ✅ Phase 3 Complete
 ```
 
 ---
@@ -476,8 +476,8 @@ def create_from_energieausweis(self, ea_data, output_path):
 
     zone_infos = self.zone_gen.add_zones(idf, layouts)
 
-    # 4. Surfaces (noch nicht extrahiert - Phase 3)
-    self._add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
+    # 4. Surfaces (✅ Phase 3 - delegiert an SurfaceGenerator)
+    self.surface_gen.add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
 
     # 5. Loads & HVAC
     schedules = self._add_schedules(idf, ea_data.gebaeudetyp)
@@ -538,9 +538,11 @@ Wiederverwendbare Bausteine für IDF-Generierung.
 - Phase 1: Wrapper um Standard-Konstruktionen
 - Phase 2+: U-Wert → Dämmstoffdicke Berechnung (geplant)
 
-#### 5. **SurfaceGenerator** (`surfaces.py`) - **Phase 3 - TODO**
+#### 5. **SurfaceGenerator** (`surfaces.py`) - ✅ **Phase 3 - COMPLETE**
 - Erstellt Walls, Floors, Ceilings, Roofs, Windows
-- Komplex: 615 Zeilen, Vertex-Ordering, Boundary-Pairs
+- 612 Zeilen spezialisierter Code
+- Kritische EnergyPlus-Konzepte: Vertex-Ordering, Boundary-Pairs
+- Returns: Void (Phase 4: könnte `List[SurfaceInfo]` zurückgeben)
 
 ---
 

@@ -136,10 +136,63 @@ gen.add_constructions_from_u_values(idf, ea_data)
 
 ---
 
-## Dataclasses (`../models.py`)
+#### 5. `surfaces.py` - SurfaceGenerator
+**Zweck**: Erstellt alle Gebäudeflächen (Floors, Ceilings, Walls, Windows)
+
+**Status**: ✅ Phase 3 - Vollständig implementiert (612 Zeilen)
+
+**Erstellt**:
+- Floors (Ground und inter-floor)
+- Ceilings/Roofs (inter-floor und top floor)
+- Exterior Walls mit Windows (nur Perimeter-Zonen)
+- Interior Walls (Perimeter↔Core, Perimeter↔Perimeter)
+- Windows mit WWR-basierten Dimensionen
+
+**Kritische EnergyPlus-Konzepte**:
+- ✅ Counter-clockwise vertex ordering (PFLICHT)
+- ✅ Floor vertices REVERSED [3,2,1,0] für downward normal
+- ✅ Ceiling vertices NORMAL [0,1,2,3] für upward normal
+- ✅ Interior wall pairs mit reversed vertices für thermal coupling
+
+**Verwendung**:
+```python
+gen = SurfaceGenerator()
+gen.add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
+```
+
+**Interne Methoden**:
+- `_add_floors_5_zone()` - Bodenplatten mit Ground/Surface boundary
+- `_add_ceilings_5_zone()` - Decken/Dächer
+- `_add_exterior_walls_5_zone()` - Außenwände für 4 Perimeter-Zonen
+- `_add_exterior_wall()` - Einzelne Außenwand mit Fenster
+- `_add_window()` - Window placement mit sqrt(WWR) scaling, 0.9m sill height
+- `_add_interior_walls_5_zone()` - 8 Wandpaare (4x Perimeter↔Core + 4x Ecken)
+- `_add_interior_wall_pair()` - Paar von thermisch gekoppelten Wänden
+
+**Wichtige Algorithmen**:
+```python
+# Window scaling (proportional)
+scale_factor = wwr**0.5
+window_width = wall_width * scale_factor
+window_height = wall_height * scale_factor
+
+# Sill height constraints
+sill_height = 0.9  # 90cm
+max_height = wall_height - sill_height - 0.3
+```
+
+---
+
+## Dataclasses (`../../types/generator_types.py`)
 
 ### ZoneInfo
-Metadaten über erstellte Zonen
+Metadaten über erstellte Zonen (verwendet von ZoneGenerator)
+
+### SurfaceInfo
+Metadaten über erstellte Surfaces (geplant für Phase 4)
+
+### WindowInfo
+Metadaten über erstellte Fenster (geplant für Phase 4)
 
 ### MetadataConfig
 Konfiguration für Simulation-Settings (Timestep, RunPeriod, etc.)
@@ -162,14 +215,15 @@ Der FiveZoneGenerator instanziiert alle Module in `__init__`:
 ```python
 class FiveZoneGenerator:
     def __init__(self, config=None):
-        # Generator modules
+        # Generator components
         self.metadata_gen = MetadataGenerator(MetadataConfig())
         self.materials_gen = MaterialsGenerator()
         self.zone_gen = ZoneGenerator()
+        self.surface_gen = SurfaceGenerator()  # NEW: Phase 3
         self.eppy_fixer = EppyBugFixer(debug=False)
 ```
 
-Und delegiert Aufgaben an die spezialisierten Module:
+Und delegiert Aufgaben an die spezialisierten Komponenten:
 
 ```python
 def create_from_energieausweis(...):
@@ -183,7 +237,11 @@ def create_from_energieausweis(...):
     # Zones
     zone_infos = self.zone_gen.add_zones(idf, layouts)
 
-    # ... Surfaces, Loads, HVAC ...
+    # Surfaces (NEW: Phase 3)
+    self.surface_gen.add_surfaces_5_zone(idf, layouts, geo_solution, orientation_wwr)
+
+    # Loads, HVAC, etc.
+    ...
 
     # Output
     self.metadata_gen.add_output_variables(idf)
@@ -201,14 +259,18 @@ def create_from_energieausweis(...):
 Jedes Modul sollte individuell getestet werden:
 
 ```
-tests/geometrie/generators/modules/
+tests/geometrie/generators/components/
 ├── test_eppy_workarounds.py
 ├── test_metadata.py
 ├── test_zones.py
-└── test_materials.py
+├── test_materials.py
+└── test_surfaces.py  # geplant
 ```
 
-Baseline Integration Tests: `tests/geometrie/generators/test_five_zone_integration.py`
+**Baseline Integration Tests**: `tests/geometrie/generators/test_five_zone_integration.py`
+- 12 umfassende Tests
+- Decken alle Komponenten ab (Zones, Surfaces, Materials, etc.)
+- ✅ Alle Tests bestanden (Phase 3 verifiziert)
 
 ---
 
@@ -220,41 +282,43 @@ Baseline Integration Tests: `tests/geometrie/generators/test_five_zone_integrati
 - Schwer zu testen
 - Schwer zu erweitern
 
-### Nach Refactoring:
-- `five_zone_generator.py`: **~400 Zeilen** (Orchestrator)
+### Nach Refactoring (Phase 1-3):
+- `five_zone_generator.py`: **~520 Zeilen** (Orchestrator)
 - `eppy_workarounds.py`: 100 Zeilen
 - `metadata.py`: 150 Zeilen
 - `zones.py`: 80 Zeilen
 - `materials.py`: 50 Zeilen
-- **Gesamt**: ~780 Zeilen produktiver Code (vs. 1379)
+- `surfaces.py`: 612 Zeilen (✅ Phase 3)
+- **Gesamt**: ~1512 Zeilen gut strukturierter Code (vs. 1379 monolithisch)
 
 **Gewinn**:
-- ✅ 43% Reduktion durch Deduplizierung
-- ✅ Klare Verantwortlichkeiten
-- ✅ Testbare Komponenten
+- ✅ 62% mehr Code, aber viel besser strukturiert
+- ✅ Klare Verantwortlichkeiten (5 spezialisierte Komponenten)
+- ✅ Testbare, isolierte Komponenten
 - ✅ Wiederverwendbare Module
+- ✅ Reduzierter Orchestrator (1379 → 520 Zeilen = -62%)
 
 ---
 
-## Nächste Schritte (Phase 3)
+## Nächste Schritte (Phase 4)
 
-### SurfaceGenerator (geplant)
-Der größte verbleibende Block (~615 Zeilen) sollte in der nächsten Session extrahiert werden:
+### Return Type Enhancement (geplant)
+`SurfaceGenerator` könnte erweitert werden um Metadaten zurückzugeben:
 
-```
-modules/surfaces.py - SurfaceGenerator
-├── add_surfaces_5_zone()
-├── _add_floors_5_zone()
-├── _add_ceilings_5_zone()
-├── _add_exterior_walls_5_zone()
-├── _add_window()
-├── _add_interior_walls_5_zone()
-└── _add_interior_wall_pair()
+```python
+def add_surfaces_5_zone(...) -> List[SurfaceInfo]:
+    """Returns metadata about created surfaces."""
+    return surface_infos
 ```
 
 Mit Dataclasses:
-- `SurfaceInfo` - Metadaten über Surfaces
-- `WindowInfo` - Metadaten über Fenster
+- `SurfaceInfo` - Metadaten über Surfaces (Name, Type, Area, Construction)
+- `WindowInfo` - Metadaten über Fenster (Name, WWR, Area, Parent Wall)
+
+**Nutzen**: Diagnostics, Validation, Testing
+
+### U-Value Construction Generator (MaterialsGenerator Phase 2)
+Automatische Berechnung von Dämmstoffdicken aus U-Werten.
 
 ---
 
@@ -262,4 +326,5 @@ Mit Dataclasses:
 
 Teil des AI_BS Projekts
 Erstellt: 2025-11-13
-Dokumentiert: Phase 1-2 Refactoring
+Dokumentiert: Phase 1-3 Refactoring
+Letzte Aktualisierung: 2025-11-13 (Phase 3 Complete)
