@@ -1,15 +1,22 @@
 # 🚀 Roadmap: Next Session - Tool Improvements & Refactoring
 
-**Status:** Planning
+**Status:** Phase 3 Complete - Ready for Phase 4
 **Priority:** High
 **Created:** 2025-11-12
-**Session Goal:** Improve code architecture, user experience, and configurability
+**Updated:** 2025-11-13 (Phase 3 Complete)
+**Next Goal:** Phase 4 - Return Types, U-Value Generator, HVAC Extraction
 
 ---
 
 ## 📊 Current State (Achievements)
 
 ### ✅ What Works Now:
+- ✅ **Phase 3 Refactoring Complete!** (Session 2025-11-13)
+  - SurfaceGenerator extracted (612 lines)
+  - Orchestrator reduced: 1379 → 520 lines (-62%)
+  - 5 specialized components + orchestrator
+  - All 12 integration tests passed
+  - Comprehensive documentation updated
 - ✅ **Internal Loads Fixed!** (Issue #5 resolved)
   - Native eppy approach: PEOPLE + LIGHTS + ELECTRICEQUIPMENT
   - 12MB SQL, 0 Severe Errors, 30 objects working
@@ -19,6 +26,22 @@
 - ✅ **Multi-floor Support:** Tested with 2 floors
 - ✅ **Simulation Pipeline:** End-to-end workflow functional
 - ✅ **Web UI:** Geometry → HVAC → Simulation → Results
+
+### 🏗️ Architecture (Post-Phase 3):
+```
+features/geometrie/
+├── models/           # Layer 1: Input
+├── types/            # Layer 2: Internal Types
+├── utils/            # Layer 3: Calculations
+└── generators/       # Layer 4: IDF Creation
+    ├── five_zone_generator.py  (520 lines - Orchestrator)
+    └── components/              (5 Components)
+        ├── eppy_workarounds.py  (100 lines) ✅
+        ├── metadata.py          (150 lines) ✅
+        ├── zones.py             (80 lines) ✅
+        ├── materials.py         (50 lines) ✅
+        └── surfaces.py          (612 lines) ✅ Phase 3
+```
 
 ---
 
@@ -58,15 +81,16 @@ class FiveZoneGenerator:
 **Reference:** See `ARCHITECTURE_PROPOSAL.md`
 
 **Tasks:**
-- [ ] Extract `_generate_metadata()` (Building-level settings)
-- [ ] Extract `_generate_materials()` (Constructions, Materials)
-- [ ] Extract `_generate_schedules()` (already done via NativeInternalLoadsManager)
-- [ ] Extract `_generate_zones()` (Zone geometry)
-- [ ] Extract `_generate_surfaces()` (Walls, Floors, Ceilings)
-- [ ] Extract `_generate_fenestration()` (Windows)
-- [ ] Extract `_generate_internal_loads()` (already done)
-- [ ] Extract `_generate_hvac()` (HVAC systems)
-- [ ] Add data classes for information flow (ZoneInfo, SurfaceInfo)
+- [x] Extract `_generate_metadata()` → ✅ MetadataGenerator (Phase 1)
+- [x] Extract `_generate_materials()` → ✅ MaterialsGenerator (Phase 2)
+- [x] Extract `_generate_schedules()` → ✅ NativeInternalLoadsManager
+- [x] Extract `_generate_zones()` → ✅ ZoneGenerator (Phase 2)
+- [x] Extract `_generate_surfaces()` → ✅ SurfaceGenerator (Phase 3)
+- [x] Extract `_generate_fenestration()` → ✅ Teil von SurfaceGenerator (Phase 3)
+- [x] Extract `_generate_internal_loads()` → ✅ Already done
+- [ ] Extract `_generate_hvac()` → 🔜 **Phase 4C** (2h)
+- [x] Add data classes for information flow → ✅ ZoneInfo (in types/)
+- [ ] Add SurfaceInfo, WindowInfo → 🔜 **Phase 4A** (2-3h)
 
 ---
 
@@ -547,7 +571,7 @@ python scripts/run_simulation_from_config.py --config simulation_config.yaml
 ## 🎯 Success Metrics
 
 **Phase 1:**
-- [ ] FiveZoneGenerator split into <300 lines per function
+- [x] FiveZoneGenerator split into <300 lines per function → ✅ (520 lines orchestrator, 5 components)
 - [ ] All templates in single `resources/` tree
 - [ ] Input Summary shows 100% of simulation params
 
@@ -563,6 +587,152 @@ python scripts/run_simulation_from_config.py --config simulation_config.yaml
 
 ---
 
+## 🚀 Phase 4: Completion & Enhancement
+
+**Status:** Ready to start (Phase 3 Complete)
+**Estimated:** 8-10h total
+
+### 4A. Return Type Enhancement (~2-3h)
+**Goal:** Metadaten über erstellte Surfaces zurückgeben
+
+**Proposed Implementation:**
+```python
+@dataclass
+class SurfaceInfo:
+    name: str              # "Perimeter_North_F1_Wall_North"
+    surface_type: str      # "Wall", "Floor", "Ceiling", "Roof"
+    area: float            # m²
+    construction: str      # "WallConstruction"
+    zone_name: str
+    boundary_condition: str
+    has_window: bool
+    window_info: Optional[WindowInfo] = None
+
+@dataclass
+class WindowInfo:
+    name: str
+    area: float
+    wwr: float             # Window-Wall-Ratio
+    sill_height: float
+    parent_wall: str
+
+# Usage:
+surface_infos = self.surface_gen.add_surfaces_5_zone(...)
+# Returns: List[SurfaceInfo]
+```
+
+**Benefits:**
+- ✅ Better validation and diagnostics
+- ✅ Easier testing (surface counts, areas)
+- ✅ Detailed reporting capabilities
+
+**Tasks:**
+- [ ] Create `SurfaceInfo` and `WindowInfo` dataclasses in `types/`
+- [ ] Update `SurfaceGenerator` to collect and return info
+- [ ] Update tests to validate returned info
+- [ ] Update documentation
+
+---
+
+### 4B. U-Value Construction Generator (~4-5h)
+**Goal:** Automatische Berechnung von Dämmstoffdicken aus U-Werten
+
+**Current Problem:**
+- MaterialsGenerator ist nur Wrapper um `add_basic_constructions()`
+- Hardcoded Materialien
+- Keine U-Wert-Berechnung
+
+**Proposed Implementation:**
+```python
+class MaterialsGenerator:
+    def create_construction_from_u_value(
+        self,
+        idf: IDF,
+        construction_type: str,  # "Wall", "Roof", "Floor"
+        target_u_value: float    # W/m²K
+    ) -> str:
+        """
+        Berechnet Dämmstoffdicke für Ziel-U-Wert.
+
+        U = 1 / (R_si + R_wall + R_insulation + R_se)
+        R_insulation = d / λ
+        → d = λ * (1/U - R_si - R_wall - R_se)
+
+        Returns: Construction Name
+        """
+
+# Usage:
+wall = materials_gen.create_construction_from_u_value(
+    idf, "Wall", target_u_value=0.30
+)
+```
+
+**Benefits:**
+- ✅ User kann U-Werte direkt eingeben
+- ✅ Physikalisch korrekte Konstruktionen
+- ✅ DIN 4108 konform
+
+**Tasks:**
+- [ ] Implement thermal resistance calculations
+- [ ] Add material database (λ-values)
+- [ ] Create layer thickness calculator
+- [ ] Add validation (min/max thickness)
+- [ ] Add tests (known U-values)
+- [ ] Document algorithm & assumptions
+
+---
+
+### 4C. HVAC Generator Extraktion (~2h)
+**Goal:** Komplettierung der Modularisierung
+
+**Current State:**
+- HVAC-Code noch im Orchestrator
+- `_add_hvac_system()` nur Wrapper
+
+**Proposed Implementation:**
+```python
+class HVACGenerator:
+    """Komponente für HVAC-System-Generierung."""
+
+    def add_ideal_loads(
+        self,
+        idf: IDF,
+        zones: List[ZoneInfo]
+    ) -> None:
+        """Fügt IdealLoads HVAC zu allen Zonen hinzu."""
+
+    def add_zone_hvac(
+        self,
+        idf: IDF,
+        zones: List[ZoneInfo],
+        system_type: str
+    ) -> None:
+        """Fügt Zone-Level HVAC (PTACs, Fan Coils, etc.) hinzu."""
+```
+
+**Benefits:**
+- ✅ Orchestrator weiter reduziert
+- ✅ HVAC-Logik isoliert und testbar
+- ✅ Alle 6 Kern-Komponenten extrahiert
+- ✅ Einfachere Erweiterung um neue HVAC-Typen
+
+**Tasks:**
+- [ ] Create `components/hvac.py` with `HVACGenerator`
+- [ ] Extract HVAC methods from orchestrator
+- [ ] Update orchestrator to delegate
+- [ ] Add tests
+- [ ] Update documentation
+
+---
+
+### Recommended Order:
+
+1. **4C - HVAC Generator** (2h) - Completes modularization
+2. **4A - Return Types** (2-3h) - Improves validation/testing
+3. **4B - U-Value Generator** (4-5h) - Most valuable user feature
+
+---
+
 ## 🤝 Feedback Welcome!
 
 Questions to consider:
@@ -574,7 +744,12 @@ Questions to consider:
 ---
 
 **Next Steps:**
-1. Review this roadmap
-2. Adjust priorities if needed
-3. Start with Phase 1, Task 1 (FiveZoneGenerator refactoring)
-4. Iterate!
+1. ~~Review this roadmap~~ ✅ Done
+2. ~~Adjust priorities if needed~~ ✅ Phase 4 defined
+3. ~~Start with Phase 1, Task 1~~ ✅ Phase 3 Complete
+4. **Start Phase 4!** 🚀
+   - 4C: HVAC Generator (2h)
+   - 4A: Return Types (2-3h)
+   - 4B: U-Value Generator (4-5h)
+
+**See also:** `SESSION_SUMMARY_2025-11-13_PHASE3.md` for detailed Phase 3 results
