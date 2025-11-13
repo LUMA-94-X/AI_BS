@@ -19,7 +19,22 @@ Each YAML file describes:
 
 ## 📁 Available Scenarios
 
-### Residential Buildings
+### 🏗️ Workflow Types
+
+This tool supports **two workflows**:
+
+1. **SimpleBox** - Parametric box model for rapid studies
+   - Quick geometry definition (length × width × height)
+   - Uniform envelope properties
+   - Single-zone or multi-floor models
+
+2. **Energieausweis** ⭐ **NEW!** - 5-zone model from Austrian/German energy certificates
+   - Based on certified building data
+   - Realistic U-values from energy certificates
+   - 5-zone model (North, East, South, West, Core) for orientation effects
+   - Geometry reconstructed from envelope areas
+
+### Residential Buildings - SimpleBox
 
 #### `efh_standard.yaml` - Standard Single-Family Home
 - **Type:** Einfamilienhaus (EFH)
@@ -43,7 +58,7 @@ python scripts/run_from_config.py scenarios/efh_standard.yaml
 python scripts/run_from_config.py scenarios/efh_passivhaus.yaml
 ```
 
-### Commercial Buildings
+### Commercial Buildings - SimpleBox
 
 #### `office_small.yaml` - Small Office Building
 - **Type:** Office
@@ -55,6 +70,27 @@ python scripts/run_from_config.py scenarios/efh_passivhaus.yaml
 ```bash
 python scripts/run_from_config.py scenarios/office_small.yaml
 ```
+
+### Residential Buildings - Energieausweis ⭐ **NEW!**
+
+#### `energieausweis_efh_example.yaml` - Energy Certificate Model
+- **Type:** Einfamilienhaus (EFH) - 5-Zone Model
+- **Standard:** Built 2010
+- **Net Floor Area:** 150 m²
+- **U-Values:** Wall: 0.28, Roof: 0.20, Window: 1.3 W/m²K
+- **Features:**
+  - Geometry reconstructed from envelope areas
+  - Windows specified by orientation (North, East, South, West)
+  - Realistic infiltration from Blower Door test
+- **Expected Energy:** ~75-95 kWh/m²a
+
+```bash
+python scripts/run_from_config.py scenarios/energieausweis_efh_example.yaml
+```
+
+**How to create your own:**
+1. Export from Web UI after entering energy certificate data
+2. Or copy `energieausweis_efh_example.yaml` and edit U-values and areas
 
 ---
 

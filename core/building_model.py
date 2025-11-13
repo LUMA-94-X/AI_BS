@@ -152,15 +152,17 @@ class BuildingModel(BaseModel):
             "aspect_ratio": geo_solution.aspect_ratio
         }
 
-        # Speichere relevante Energieausweis-Daten für Kontext
-        ea_metadata = {
-            "nettoflaeche_m2": ea_data.nettoflaeche_m2,
-            "u_wert_wand": ea_data.u_wert_wand,
-            "u_wert_dach": ea_data.u_wert_dach,
-            "u_wert_fenster": ea_data.u_wert_fenster,
-            "baujahr": ea_data.baujahr,
-            "geometry_method": geo_solution.method.value,
-            "confidence": geo_solution.confidence
+        # Speichere VOLLSTÄNDIGE Energieausweis-Daten für YAML Export/Import
+        # Wichtig: Alle Felder speichern, nicht nur Subset!
+        ea_full_data = ea_data.model_dump()  # Pydantic serialization
+
+        # Ergänze GeometrySolver-Metadaten
+        ea_full_data["_geometry_solver_meta"] = {
+            "method": geo_solution.method.value,
+            "confidence": geo_solution.confidence,
+            "calculated_length": geo_solution.length,
+            "calculated_width": geo_solution.width,
+            "calculated_height": geo_solution.height
         }
 
         return cls(
@@ -170,7 +172,7 @@ class BuildingModel(BaseModel):
             num_zones=num_zones,
             has_hvac=False,  # Initial ohne HVAC
             gebaeudetyp=ea_data.gebaeudetyp.value,
-            energieausweis_data=ea_metadata
+            energieausweis_data=ea_full_data  # Now contains ALL fields!
         )
 
     def get_display_name(self) -> str:

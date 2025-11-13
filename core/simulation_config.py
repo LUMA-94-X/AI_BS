@@ -7,7 +7,7 @@ SimulationConfig describes a specific building to simulate.
 
 from pathlib import Path
 from typing import Dict, List, Optional, Literal
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import yaml
 
 
@@ -25,6 +25,97 @@ class GeometryParams(BaseModel):
     floor_height: Optional[float] = Field(None, gt=0, description="Height per floor (overrides height)")
     window_wall_ratio: float = Field(0.3, ge=0, le=1, description="Window-to-wall ratio")
     orientation: float = Field(0.0, description="Building orientation in degrees (0=North)")
+
+
+class FensterParams(BaseModel):
+    """Window area parameters by orientation.
+
+    Can specify either exact areas per orientation OR a window-to-wall ratio.
+    """
+
+    # Variant A: Exact areas per orientation (preferred)
+    nord_m2: Optional[float] = Field(None, ge=0, description="North-facing window area [m²]")
+    ost_m2: Optional[float] = Field(None, ge=0, description="East-facing window area [m²]")
+    sued_m2: Optional[float] = Field(None, ge=0, description="South-facing window area [m²]")
+    west_m2: Optional[float] = Field(None, ge=0, description="West-facing window area [m²]")
+
+    # Variant B: Overall WWR (fallback)
+    window_wall_ratio: Optional[float] = Field(
+        0.3,
+        ge=0.05,
+        le=0.95,
+        description="Overall window-to-wall ratio"
+    )
+
+
+class EnergieausweisParams(BaseModel):
+    """Parameters from Austrian/German Energy Certificate (Energieausweis).
+
+    This enables the 5-Zone model workflow using certified building data.
+    Geometry will be reconstructed from envelope areas if provided.
+    """
+
+    # ============ REQUIRED: U-Values and Net Floor Area ============
+    nettoflaeche_m2: float = Field(
+        ...,
+        gt=10,
+        lt=50000,
+        description="Net conditioned floor area [m²]"
+    )
+
+    u_wert_wand: float = Field(..., gt=0.1, lt=3.0, description="Wall U-value [W/m²K]")
+    u_wert_dach: float = Field(..., gt=0.1, lt=2.0, description="Roof U-value [W/m²K]")
+    u_wert_boden: float = Field(..., gt=0.1, lt=2.0, description="Floor slab U-value [W/m²K]")
+    u_wert_fenster: float = Field(..., gt=0.5, lt=6.0, description="Window U-value [W/m²K]")
+
+    # ============ OPTIONAL: Envelope Areas (for geometry reconstruction) ============
+    wandflaeche_m2: Optional[float] = Field(None, gt=0, description="Total external wall area [m²]")
+    dachflaeche_m2: Optional[float] = Field(None, gt=0, description="Roof area [m²]")
+    bodenflaeche_m2: Optional[float] = Field(None, gt=0, description="Floor slab area [m²]")
+
+    # ============ OPTIONAL: Geometry Hints ============
+    anzahl_geschosse: int = Field(2, ge=1, le=20, description="Number of floors")
+    geschosshoehe_m: float = Field(3.0, ge=2.3, le=4.5, description="Floor height [m]")
+    aspect_ratio_hint: float = Field(
+        1.5,
+        ge=1.0,
+        le=3.0,
+        description="Hint for length/width ratio (for geometry reconstruction)"
+    )
+
+    # ============ WINDOWS ============
+    fenster: FensterParams = Field(default_factory=FensterParams, description="Window areas by orientation")
+    g_wert_fenster: float = Field(
+        0.6,
+        ge=0.1,
+        le=0.9,
+        description="Solar Heat Gain Coefficient (g-value / SHGC)"
+    )
+
+    # ============ VENTILATION ============
+    luftwechselrate_h: float = Field(0.5, ge=0.0, le=3.0, description="Air change rate [1/h]")
+    infiltration_ach50: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=15.0,
+        description="Infiltration at 50 Pa [1/h] from Blower Door test"
+    )
+
+    # ============ METADATA ============
+    gebaeudetyp: Literal["EFH", "MFH", "NWG"] = Field("MFH", description="Building type: EFH (single-family), MFH (multi-family), NWG (commercial)")
+    baujahr: Optional[int] = Field(None, ge=1800, le=2030, description="Year of construction")
+
+    # ============ GEOMETRY SOLVER METADATA (auto-populated from UI) ============
+    geometry_solver_method: Optional[str] = Field(
+        None,
+        description="Method used for geometry reconstruction (e.g., 'complete_areas', 'nettoflaeche_only')"
+    )
+    geometry_solver_confidence: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Confidence score of geometry reconstruction (0-1)"
+    )
 
 
 class EnvelopeParams(BaseModel):
@@ -64,13 +155,39 @@ class ZoneParams(BaseModel):
 
 
 class BuildingParams(BaseModel):
-    """Complete building definition."""
+    """Complete building definition.
+
+    Supports two workflows:
+    1. SimpleBox: Provide 'geometry' + 'envelope' parameters
+    2. Energieausweis: Provide 'energieausweis' parameters (geometry will be reconstructed)
+    """
 
     name: str = Field(description="Building name/identifier")
     building_type: Literal["residential", "office", "retail", "mixed"] = "residential"
 
-    geometry: GeometryParams
-    envelope: EnvelopeParams = Field(default_factory=EnvelopeParams)
+    # Source workflow (auto-determined from which params are provided)
+    source: Literal["simplebox", "energieausweis"] = Field(
+        "simplebox",
+        description="Source workflow: 'simplebox' or 'energieausweis'"
+    )
+
+    # SimpleBox workflow params
+    geometry: Optional[GeometryParams] = Field(None, description="Geometry parameters (SimpleBox workflow)")
+    envelope: EnvelopeParams = Field(default_factory=EnvelopeParams, description="Envelope parameters (SimpleBox workflow)")
+
+    # Energieausweis workflow params
+    energieausweis: Optional[EnergieausweisParams] = Field(
+        None,
+        description="Energieausweis parameters (5-Zone workflow)"
+    )
+
+    # Calculated geometry (populated after Energieausweis reconstruction)
+    calculated_geometry: Optional[GeometryParams] = Field(
+        None,
+        description="Geometry calculated from Energieausweis data (auto-populated)"
+    )
+
+    # Zone configurations
     zones: Dict[str, ZoneParams] = Field(default_factory=dict, description="Zone configurations")
 
     # If zones is empty, use default zone params for whole building
@@ -83,6 +200,32 @@ class BuildingParams(BaseModel):
         if v and any(not name.strip() for name in v.keys()):
             raise ValueError("Zone names cannot be empty")
         return v
+
+    @model_validator(mode='after')
+    def validate_workflow(self):
+        """Validate that either geometry OR energieausweis is provided."""
+        has_geometry = self.geometry is not None
+        has_ea = self.energieausweis is not None
+
+        if not has_geometry and not has_ea:
+            raise ValueError(
+                "Must provide either 'geometry' (SimpleBox workflow) "
+                "OR 'energieausweis' (5-Zone workflow)"
+            )
+
+        if has_geometry and has_ea:
+            raise ValueError(
+                "Cannot provide both 'geometry' and 'energieausweis'. "
+                "Choose one workflow: SimpleBox or Energieausweis"
+            )
+
+        # Auto-set source based on what's provided
+        if has_ea:
+            self.source = "energieausweis"
+        else:
+            self.source = "simplebox"
+
+        return self
 
 
 # ============================================================================

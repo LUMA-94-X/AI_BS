@@ -32,6 +32,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.simulation_config import SimulationConfig
 from features.geometrie.box_generator import SimpleBoxGenerator, BuildingGeometry
+from features.geometrie.generators.five_zone_generator import FiveZoneGenerator
+from features.geometrie.models.energieausweis_input import EnergieausweisInput, FensterData, GebaeudeTyp
 from features.hvac.ideal_loads import create_building_with_hvac
 from features.simulation.runner import EnergyPlusRunner
 from features.auswertung.kpi_rechner import KennzahlenRechner
@@ -71,14 +73,30 @@ def validate_config(config: SimulationConfig) -> None:
     logger.info(f"  ✓ Weather file: {weather_path.name}")
 
     # Validate building parameters
-    geom = config.building.geometry
-    logger.info(f"  ✓ Geometry: {geom.length}m × {geom.width}m × {geom.height}m")
-    logger.info(f"  ✓ Floors: {geom.num_floors}")
-    logger.info(f"  ✓ WWR: {geom.window_wall_ratio:.1%}")
+    logger.info(f"  ✓ Source: {config.building.source}")
 
-    # Calculate floor area
-    floor_area = geom.length * geom.width * geom.num_floors
-    logger.info(f"  ✓ Total floor area: {floor_area:.1f} m²")
+    if config.building.source == "energieausweis":
+        # Energieausweis workflow
+        ea = config.building.energieausweis
+        logger.info(f"  ✓ Building type: {ea.gebaeudetyp}")
+        logger.info(f"  ✓ Net floor area: {ea.nettoflaeche_m2:.1f} m²")
+        logger.info(f"  ✓ Floors: {ea.anzahl_geschosse}")
+        logger.info(f"  ✓ U-values: Wall={ea.u_wert_wand} / Roof={ea.u_wert_dach} / Window={ea.u_wert_fenster}")
+
+        # Check if calculated_geometry is provided
+        if config.building.calculated_geometry:
+            calc_geom = config.building.calculated_geometry
+            logger.info(f"  ✓ Calculated geometry: {calc_geom.length:.1f}m × {calc_geom.width:.1f}m × {calc_geom.height:.1f}m")
+    else:
+        # SimpleBox workflow
+        geom = config.building.geometry
+        logger.info(f"  ✓ Geometry: {geom.length}m × {geom.width}m × {geom.height}m")
+        logger.info(f"  ✓ Floors: {geom.num_floors}")
+        logger.info(f"  ✓ WWR: {geom.window_wall_ratio:.1%}")
+
+        # Calculate floor area
+        floor_area = geom.length * geom.width * geom.num_floors
+        logger.info(f"  ✓ Total floor area: {floor_area:.1f} m²")
 
     logger.info("Configuration is valid!")
 
@@ -96,21 +114,7 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
     logger = logging.getLogger(__name__)
     logger.info("Creating building model...")
 
-    # Create geometry from config
-    geom_params = config.building.geometry
-    geometry = BuildingGeometry(
-        length=geom_params.length,
-        width=geom_params.width,
-        height=geom_params.height,
-        num_floors=geom_params.num_floors,
-        window_wall_ratio=geom_params.window_wall_ratio,
-        orientation=geom_params.orientation,
-    )
-
-    logger.info(f"  Building: {geometry.length}m × {geometry.width}m × {geometry.height}m")
-    logger.info(f"  Floor area: {geometry.total_floor_area:.1f} m²")
-
-    # Build sim_settings from YAML config
+    # Build sim_settings from YAML config (common to both workflows)
     sim_settings = {
         'timestep': config.simulation.timestep,
         'start_month': config.simulation.period.start_month,
@@ -126,13 +130,91 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
     logger.info(f"    Period: {sim_settings['start_month']}/{sim_settings['start_day']} - {sim_settings['end_month']}/{sim_settings['end_day']}")
     logger.info(f"    Output frequency: {sim_settings['reporting_frequency']}")
 
-    # Generate IDF (don't save yet - we'll add HVAC first!)
-    generator = SimpleBoxGenerator()
-    idf = generator.create_model(geometry, idf_path=None, sim_settings=sim_settings)
+    # ============================================================================
+    # BRANCH: Energieausweis Workflow
+    # ============================================================================
+    if config.building.source == "energieausweis":
+        logger.info("  Source: Energieausweis (5-Zone Model)")
 
-    logger.info(f"  ✓ IDF created (in memory)")
+        ea_params = config.building.energieausweis
+        if not ea_params:
+            raise ValueError("Energieausweis parameters not found in config")
 
-    # Add HVAC system
+        # Reconstruct FensterData
+        fenster_data = FensterData(
+            nord_m2=ea_params.fenster.nord_m2,
+            ost_m2=ea_params.fenster.ost_m2,
+            sued_m2=ea_params.fenster.sued_m2,
+            west_m2=ea_params.fenster.west_m2,
+            window_wall_ratio=ea_params.fenster.window_wall_ratio
+        )
+
+        # Reconstruct EnergieausweisInput
+        ea_input = EnergieausweisInput(
+            nettoflaeche_m2=ea_params.nettoflaeche_m2,
+            u_wert_wand=ea_params.u_wert_wand,
+            u_wert_dach=ea_params.u_wert_dach,
+            u_wert_boden=ea_params.u_wert_boden,
+            u_wert_fenster=ea_params.u_wert_fenster,
+            wandflaeche_m2=ea_params.wandflaeche_m2,
+            dachflaeche_m2=ea_params.dachflaeche_m2,
+            bodenflaeche_m2=ea_params.bodenflaeche_m2,
+            anzahl_geschosse=ea_params.anzahl_geschosse,
+            geschosshoehe_m=ea_params.geschosshoehe_m,
+            fenster=fenster_data,
+            g_wert_fenster=ea_params.g_wert_fenster,
+            luftwechselrate_h=ea_params.luftwechselrate_h,
+            infiltration_ach50=ea_params.infiltration_ach50,
+            gebaeudetyp=GebaeudeTyp(ea_params.gebaeudetyp),
+            baujahr=ea_params.baujahr,
+            aspect_ratio_hint=ea_params.aspect_ratio_hint
+        )
+
+        logger.info(f"  Building type: {ea_input.gebaeudetyp.value}")
+        logger.info(f"  Net floor area: {ea_input.nettoflaeche_m2:.1f} m²")
+        logger.info(f"  U-values: Wall={ea_input.u_wert_wand} / Roof={ea_input.u_wert_dach} / Window={ea_input.u_wert_fenster}")
+
+        # Generate 5-Zone IDF
+        generator = FiveZoneGenerator()
+        idf = generator.create_from_energieausweis(
+            ea_data=ea_input,
+            output_path=None,  # Don't save yet, we'll add HVAC first
+            sim_settings=sim_settings
+        )
+
+        logger.info(f"  ✓ 5-Zone IDF created (in memory)")
+
+    # ============================================================================
+    # BRANCH: SimpleBox Workflow
+    # ============================================================================
+    else:
+        logger.info("  Source: SimpleBox (Parametric Model)")
+
+        geom_params = config.building.geometry
+        if not geom_params:
+            raise ValueError("Geometry parameters not found in config")
+
+        geometry = BuildingGeometry(
+            length=geom_params.length,
+            width=geom_params.width,
+            height=geom_params.height,
+            num_floors=geom_params.num_floors,
+            window_wall_ratio=geom_params.window_wall_ratio,
+            orientation=geom_params.orientation,
+        )
+
+        logger.info(f"  Building: {geometry.length}m × {geometry.width}m × {geometry.height}m")
+        logger.info(f"  Floor area: {geometry.total_floor_area:.1f} m²")
+
+        # Generate SimpleBox IDF
+        generator = SimpleBoxGenerator()
+        idf = generator.create_model(geometry, idf_path=None, sim_settings=sim_settings)
+
+        logger.info(f"  ✓ SimpleBox IDF created (in memory)")
+
+    # ============================================================================
+    # Add HVAC System (common to both workflows)
+    # ============================================================================
     if config.hvac.system_type == "ideal_loads":
         logger.info("Adding HVAC system (Ideal Loads)...")
         hvac_params = config.hvac.ideal_loads
@@ -149,7 +231,7 @@ def create_building_from_config(config: SimulationConfig, output_path: Path) -> 
         logger.info(f"  Cooling setpoint: {hvac_params.cooling_setpoint}°C")
         logger.info("  ✓ HVAC system added with custom setpoints")
 
-    # NOW save the complete IDF (geometry + HVAC)
+    # Save the complete IDF (geometry + HVAC)
     idf.save(str(output_path))
     logger.info(f"  ✓ IDF saved: {output_path}")
 
@@ -326,11 +408,16 @@ def main() -> int:
         logger.info("=" * 60)
 
         # Calculate and display results
-        floor_area = (
-            config.building.geometry.length *
-            config.building.geometry.width *
-            config.building.geometry.num_floors
-        )
+        if config.building.source == "energieausweis":
+            # Use nettoflaeche_m2 from Energieausweis
+            floor_area = config.building.energieausweis.nettoflaeche_m2
+        else:
+            # Calculate from geometry
+            floor_area = (
+                config.building.geometry.length *
+                config.building.geometry.width *
+                config.building.geometry.num_floors
+            )
         calculate_results(output_dir, floor_area)
 
         return 0

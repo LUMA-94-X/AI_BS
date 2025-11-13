@@ -733,68 +733,46 @@ try:
 
         if st.button("📥 Export as YAML", type="primary", key="export_yaml_btn"):
             try:
-                # Check if this is a SimpleBox model (building_model can be dict or object)
-                source = None
-                if building_model:
-                    if isinstance(building_model, dict):
-                        source = building_model.get('source')
-                    else:
-                        source = getattr(building_model, 'source', None)
+                # Import builder
+                import sys
+                from pathlib import Path as P
+                sys.path.insert(0, str(P(__file__).parent.parent.parent.parent))
 
-                if source == "energieausweis":
-                    st.error("""
-                    ❌ **Energieausweis YAML export not yet supported**
+                from features.web_ui.utils.config_builder import build_simulation_config_from_ui
+                import yaml
 
-                    YAML export is currently only available for **SimpleBox models**.
+                # Build config from session state (supports both SimpleBox and Energieausweis)
+                config = build_simulation_config_from_ui(st.session_state)
 
-                    The Energieausweis workflow uses a more complex 5-zone geometry
-                    that requires additional schema extensions. This feature is planned
-                    for a future release.
+                # Convert to YAML string
+                yaml_str = yaml.dump(
+                    config.model_dump(exclude_none=True),
+                    default_flow_style=False,
+                    sort_keys=False,
+                    allow_unicode=True,
+                    indent=2
+                )
 
-                    **Workaround:** Use the Input Summary above for documentation.
-                    """)
-                else:
-                    # Import builder
-                    import sys
-                    from pathlib import Path as P
-                    sys.path.insert(0, str(P(__file__).parent.parent.parent.parent))
+                # Generate filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                source = config.building.source
+                filename = f"{source}_export_{timestamp}.yaml"
 
-                    from features.web_ui.utils.config_builder import build_simulation_config_from_ui
-                    import yaml
+                # Download button
+                st.download_button(
+                    label="💾 Download YAML Config",
+                    data=yaml_str,
+                    file_name=filename,
+                    mime="text/yaml",
+                    key="download_yaml_btn"
+                )
 
-                    # Build config from session state
-                    config = build_simulation_config_from_ui(st.session_state)
+                st.success(f"✅ Configuration exported successfully! ({source} workflow)")
 
-                    # Convert to YAML string
-                    yaml_str = yaml.dump(
-                        config.model_dump(exclude_none=True),
-                        default_flow_style=False,
-                        sort_keys=False,
-                        allow_unicode=True,
-                        indent=2
-                    )
+                # Preview
+                with st.expander("📄 YAML Preview"):
+                    st.code(yaml_str, language="yaml")
 
-                    # Generate filename
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"simulation_config_{timestamp}.yaml"
-
-                    # Download button
-                    st.download_button(
-                        label="💾 Download YAML Config",
-                        data=yaml_str,
-                        file_name=filename,
-                        mime="text/yaml",
-                        key="download_yaml_btn"
-                    )
-
-                    st.success(f"✅ Configuration exported successfully!")
-
-                    # Preview
-                    with st.expander("📄 YAML Preview"):
-                        st.code(yaml_str, language="yaml")
-
-            except NotImplementedError as e:
-                st.error(f"❌ {str(e)}")
             except Exception as e:
                 st.error(f"❌ Export failed: {str(e)}")
                 with st.expander("🐛 Error Details"):

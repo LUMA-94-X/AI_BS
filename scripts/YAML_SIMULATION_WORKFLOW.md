@@ -79,19 +79,29 @@ resources/energyplus/weather/austria/example.epw  ✓ Bereits vorhanden
 
 ## 🏗️ YAML-Konfiguration erstellen
 
+### Workflow-Auswahl
+
+Das Tool unterstützt **zwei Workflows**:
+
+1. **SimpleBox** - Parametrisches Modell für schnelle Studien
+2. **Energieausweis** - 5-Zonen-Modell basierend auf Energieausweis-Daten (NEU!)
+
 ### Methode 1: Von Template kopieren (Empfohlen)
 
 **1. Wähle passendes Template:**
 
 ```bash
-# Residential:
+# SimpleBox - Residential:
 cp scenarios/efh_standard.yaml scenarios/mein_gebaeude.yaml
 
-# High-performance:
+# SimpleBox - High-performance:
 cp scenarios/efh_passivhaus.yaml scenarios/mein_passivhaus.yaml
 
-# Commercial:
+# SimpleBox - Commercial:
 cp scenarios/office_small.yaml scenarios/mein_buero.yaml
+
+# Energieausweis - 5-Zone Model (NEU!):
+cp scenarios/energieausweis_efh_example.yaml scenarios/mein_ea_gebaeude.yaml
 ```
 
 **2. Bearbeite die Konfiguration:**
@@ -105,6 +115,8 @@ vim scenarios/mein_gebaeude.yaml
 
 ### Methode 2: Von Grund auf erstellen
 
+#### SimpleBox-Workflow
+
 **Minimal-Beispiel:**
 
 ```yaml
@@ -116,6 +128,7 @@ version: "1.0"
 building:
   name: "Gebaeude_2025"
   building_type: "residential"  # oder "office", "retail", "mixed"
+  source: "simplebox"
 
   geometry:
     length: 12.0        # Länge in Metern
@@ -181,6 +194,108 @@ simulation:
 
   timeout: 3600  # Sekunden
 ```
+
+#### Energieausweis-Workflow (NEU!)
+
+**Minimal-Beispiel mit Energieausweis-Daten:**
+
+```yaml
+# scenarios/mein_ea_gebaeude.yaml
+name: "EA Gebäude 2010"
+description: "5-Zonen-Modell basierend auf Energieausweis"
+version: "1.0"
+
+building:
+  name: "EFH_2010_5Zone"
+  building_type: "residential"
+  source: "energieausweis"  # WICHTIG: Workflow-Selektor
+
+  energieausweis:
+    # Pflichtfelder aus Energieausweis
+    nettoflaeche_m2: 150.0
+    u_wert_wand: 0.28
+    u_wert_dach: 0.20
+    u_wert_boden: 0.35
+    u_wert_fenster: 1.3
+
+    # Optional: Hüllflächen (für Geometrie-Rekonstruktion)
+    wandflaeche_m2: 240.0
+    dachflaeche_m2: 80.0
+    bodenflaeche_m2: 80.0
+
+    # Geometrie-Hints
+    anzahl_geschosse: 2
+    geschosshoehe_m: 2.8
+    aspect_ratio_hint: 1.3
+
+    # Fenster (exakte Flächen nach Orientierung ODER window_wall_ratio)
+    fenster:
+      nord_m2: 8.0
+      ost_m2: 12.0
+      sued_m2: 20.0
+      west_m2: 10.0
+
+    g_wert_fenster: 0.6       # g-Wert / SHGC
+
+    # Lüftung
+    luftwechselrate_h: 0.5
+    infiltration_ach50: 4.0   # Optional: Blower-Door-Wert
+
+    # Metadata
+    gebaeudetyp: "EFH"        # EFH, MFH, oder NWG
+    baujahr: 2010
+
+  # Berechnete Geometrie (wird aus EA-Daten rekonstruiert - optional)
+  calculated_geometry:
+    length: 10.0
+    width: 8.0
+    height: 5.6
+    num_floors: 2
+    window_wall_ratio: 0.21
+    orientation: 0.0
+
+  default_zone:
+    zone_type: "residential"
+    people_density: 0.02
+    lighting_power: 5.0
+    equipment_power: 3.0
+    infiltration_rate: 0.5
+
+hvac:
+  system_type: "ideal_loads"
+  ideal_loads:
+    heating_setpoint: 20.0
+    cooling_setpoint: 26.0
+
+simulation:
+  weather_file: "resources/energyplus/weather/austria/example.epw"
+  timestep: 4
+
+  period:
+    start_month: 1
+    start_day: 1
+    end_month: 12
+    end_day: 31
+
+  output:
+    output_dir: "output/ea_efh_2010"
+    save_idf: true
+    save_sql: true
+    output_variables:
+      - "Zone Mean Air Temperature"
+      - "Zone Air System Sensible Heating Energy"
+      - "Zone Air System Sensible Cooling Energy"
+    reporting_frequency: "Hourly"
+
+  timeout: 3600
+```
+
+**Vorteile des Energieausweis-Workflows:**
+- ✅ Realistische U-Werte direkt aus Energieausweis
+- ✅ 5-Zonen-Modell (Nord, Ost, Süd, West, Core) für genauere Orientierungs-Effekte
+- ✅ Geometrie-Rekonstruktion aus Hüllflächen
+- ✅ Fenster nach Orientierung individuell anpassbar
+- ✅ Export aus Web-UI → Simulation via CLI reproduzierbar
 
 ### 🎨 Anpassung: Wichtige Parameter
 
