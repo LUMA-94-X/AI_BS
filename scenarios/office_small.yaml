@@ -1,0 +1,86 @@
+# Small Office Building
+# Commercial office with higher internal loads
+
+name: "Small Office"
+description: "Small office building with typical commercial loads"
+version: "1.0"
+
+building:
+  name: "Office_Small"
+  building_type: "office"
+
+  geometry:
+    length: 20.0
+    width: 15.0
+    height: 9.0
+    num_floors: 3
+    floor_height: 3.0
+    window_wall_ratio: 0.40   # Higher for daylighting
+    orientation: 0.0
+
+  envelope:
+    # Standard commercial construction
+    wall_construction: "commercial_standard"
+    wall_u_value: 0.30        # W/m²K
+
+    roof_construction: "commercial_roof"
+    roof_u_value: 0.22        # W/m²K
+
+    floor_construction: "slab_on_grade"
+    floor_u_value: 0.35       # W/m²K
+
+    window_type: "double_glazed_lowE"
+    window_u_value: 1.2       # W/m²K
+    window_shgc: 0.40         # Lower SHGC to reduce cooling load
+
+  default_zone:
+    zone_type: "office"
+
+    # Commercial office internal loads (higher than residential!)
+    people_density: 0.05      # 5 people per 100m² (typical office density)
+    lighting_power: 10.0      # W/m² (office lighting)
+    equipment_power: 8.0      # W/m² (computers, printers, etc.)
+
+    # Office schedules (occupied 8:00-18:00)
+    occupancy_schedule: "office"
+    lighting_schedule: "office"
+    equipment_schedule: "office"
+
+    # Commercial building infiltration
+    infiltration_rate: 0.3    # ACH (tighter than old residential)
+
+hvac:
+  system_type: "ideal_loads"
+
+  ideal_loads:
+    heating_setpoint: 21.0    # °C (slightly warmer for office comfort)
+    cooling_setpoint: 24.0    # °C (more aggressive cooling for internal gains)
+    outdoor_air_flow_rate: 0.0
+    economizer: true          # Use free cooling
+
+simulation:
+  weather_file: "resources/energyplus/weather/austria/example.epw"
+
+  period:
+    start_month: 1
+    start_day: 1
+    end_month: 12
+    end_day: 31
+
+  output:
+    output_dir: "output/office_small"
+    save_idf: true
+    save_sql: true
+
+    output_variables:
+      - "Zone Mean Air Temperature"
+      - "Zone Air System Sensible Heating Energy"
+      - "Zone Air System Sensible Cooling Energy"
+      - "Lights Electric Energy"
+      - "Electric Equipment Electric Energy"
+      - "Zone People Occupant Count"
+      - "Site Outdoor Air Drybulb Temperature"
+
+    reporting_frequency: "Hourly"
+
+  timeout: 3600

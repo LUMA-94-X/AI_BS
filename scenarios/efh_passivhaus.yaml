@@ -1,0 +1,85 @@
+# Passivhaus Single-Family Home
+# High-performance envelope, minimal heating/cooling demand
+
+name: "EFH Passivhaus"
+description: "Passive house with excellent insulation and airtightness"
+version: "1.0"
+
+building:
+  name: "EFH_Passivhaus"
+  building_type: "residential"
+
+  geometry:
+    length: 12.0
+    width: 10.0
+    height: 6.0
+    num_floors: 2
+    floor_height: 3.0
+    window_wall_ratio: 0.30   # Optimized for solar gains
+    orientation: 0.0          # North (optimize south facade separately)
+
+  envelope:
+    # Passivhaus standards
+    wall_construction: "high_performance"
+    wall_u_value: 0.10        # W/m²K (very low!)
+
+    roof_construction: "high_performance"
+    roof_u_value: 0.10        # W/m²K
+
+    floor_construction: "insulated_slab"
+    floor_u_value: 0.12       # W/m²K
+
+    window_type: "triple_glazed"
+    window_u_value: 0.80      # W/m²K (Passivhaus certified)
+    window_shgc: 0.50
+
+  default_zone:
+    zone_type: "residential"
+
+    # Internal loads
+    people_density: 0.02
+    lighting_power: 4.0       # Efficient LED lighting
+    equipment_power: 2.5      # Energy-efficient appliances
+
+    # Schedules
+    occupancy_schedule: "residential"
+    lighting_schedule: "residential"
+    equipment_schedule: "residential"
+
+    # Very low infiltration (airtight construction)
+    infiltration_rate: 0.1    # ACH (Passivhaus: n50 ≤ 0.6/h)
+
+hvac:
+  system_type: "ideal_loads"
+
+  ideal_loads:
+    heating_setpoint: 20.0
+    cooling_setpoint: 26.0
+    outdoor_air_flow_rate: 0.0
+    economizer: true          # Use free cooling when possible
+
+simulation:
+  weather_file: "resources/energyplus/weather/austria/example.epw"
+
+  period:
+    start_month: 1
+    start_day: 1
+    end_month: 12
+    end_day: 31
+
+  output:
+    output_dir: "output/efh_passivhaus"
+    save_idf: true
+    save_sql: true
+
+    output_variables:
+      - "Zone Mean Air Temperature"
+      - "Zone Air System Sensible Heating Energy"
+      - "Zone Air System Sensible Cooling Energy"
+      - "Site Outdoor Air Drybulb Temperature"
+      - "Surface Inside Face Temperature"
+      - "Surface Outside Face Temperature"
+
+    reporting_frequency: "Hourly"
+
+  timeout: 3600

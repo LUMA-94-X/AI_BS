@@ -6,6 +6,7 @@ Ein Python-Framework für einfache und automatisierte Gebäudeenergiesimulatione
 
 - 🏗️ **Automatische Gebäudemodellerstellung** - Keine manuelle IDF-Bearbeitung nötig
 - 📋 **5-Zone-Modell aus Energieausweis** - Automatische Geometrie-Rekonstruktion (NEU!)
+- 📝 **YAML Configuration Files** - Reproduzierbare Simulationen via Konfig (NEU!)
 - ❄️ **HVAC-Systeme** - Ideal Loads und weitere Systeme
 - 🚀 **Batch-Simulationen** - Parallel mehrere Varianten simulieren
 - 📊 **Automatische Auswertung** - KPIs, Energiekennzahlen, Effizienzklassen
@@ -102,6 +103,60 @@ python scripts/ui_starten.py
 - ▶️ **Simulation** - EnergyPlus-Simulation ausführen
 - 📊 **Ergebnisse** - KPI-Auswertung und Visualisierung
 
+### Methode 3: YAML Configuration Files (NEU!)
+
+**Reproducible simulations via configuration files:**
+
+```bash
+# Run pre-defined scenarios
+python scripts/run_from_config.py scenarios/efh_standard.yaml
+python scripts/run_from_config.py scenarios/efh_passivhaus.yaml
+python scripts/run_from_config.py scenarios/office_small.yaml
+
+# Validate before running
+python scripts/run_from_config.py scenarios/efh_standard.yaml --validate-only
+
+# Custom output directory
+python scripts/run_from_config.py scenarios/efh_passivhaus.yaml --output results/test1
+```
+
+**Available scenarios:**
+- `efh_standard.yaml` - Standard EFH (post-2000, ~100 kWh/m²a)
+- `efh_passivhaus.yaml` - Passivhaus EFH (<15 kWh/m²a heating)
+- `office_small.yaml` - Small office building (3 floors, 900m²)
+
+**Create custom scenarios:**
+```yaml
+# scenarios/my_building.yaml
+name: "My Building"
+building:
+  geometry:
+    length: 15.0
+    width: 12.0
+    num_floors: 2
+    window_wall_ratio: 0.30
+  envelope:
+    wall_u_value: 0.25    # W/m²K
+    roof_u_value: 0.20
+    window_u_value: 1.1
+hvac:
+  ideal_loads:
+    heating_setpoint: 20.0
+    cooling_setpoint: 26.0
+simulation:
+  weather_file: "resources/energyplus/weather/austria/example.epw"
+  output:
+    output_dir: "output/my_building"
+```
+
+**Benefits:**
+- ✅ **Reproducible** - Version control for simulations
+- ✅ **Scriptable** - Batch processing & automation
+- ✅ **Documented** - Self-describing configurations
+- ✅ **Fast** - Single command to run
+
+See `scenarios/README.md` for complete configuration schema and examples.
+
 ## 📁 Projekt-Struktur
 
 ```
@@ -117,8 +172,19 @@ AI_BS/
 │   └── web_ui/           # Web-Interface
 │       └── pages/        # Streamlit-Pages inkl. Energieausweis (NEU!)
 ├── core/                  # Kern-Funktionalität
+│   ├── config.py         # Tool-Konfiguration
+│   └── simulation_config.py  # Simulation-Szenarien (NEU!)
+├── resources/            # Externe Ressourcen (NEU!)
+│   └── energyplus/       # EnergyPlus-spezifisch
+│       ├── templates/    # IDF-Templates (HVAC, Loads, Schedules)
+│       └── weather/      # EPW-Wetterdaten (nach Land organisiert)
+├── scenarios/            # YAML-Simulations-Szenarien (NEU!)
+│   ├── efh_standard.yaml
+│   ├── efh_passivhaus.yaml
+│   └── office_small.yaml
 ├── beispiele/            # Beispiel-Scripts
 ├── scripts/              # Utility-Scripts
+│   └── run_from_config.py  # YAML-Config-Runner (NEU!)
 └── tests/                # Tests
 ```
 

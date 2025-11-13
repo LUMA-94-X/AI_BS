@@ -31,7 +31,7 @@ simulation:
 # Weather Data
 weather:
   # Directory containing EPW weather files
-  data_dir: "data/weather"
+  data_dir: "resources/energyplus/weather"
 
   # Default weather file (if not specified per simulation)
   default_file: ""
