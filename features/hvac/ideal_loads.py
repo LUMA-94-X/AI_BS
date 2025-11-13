@@ -27,28 +27,28 @@ class HVACTemplateManager:
         "ideal_loads": HVACTemplate(
             name="ideal_loads",
             description="Ideal Loads Air System - Unlimited heating/cooling capacity",
-            template_file=Path("templates/hvac/ideal_loads.idf"),
+            template_file=Path("resources/energyplus/templates/hvac/ideal_loads.idf"),
             suitable_for=["office", "residential", "commercial", "any"],
             complexity="simple"
         ),
         "vav_reheat": HVACTemplate(
             name="vav_reheat",
             description="Variable Air Volume with Reheat - Standard for large offices",
-            template_file=Path("templates/hvac/vav_reheat.idf"),
+            template_file=Path("resources/energyplus/templates/hvac/vav_reheat.idf"),
             suitable_for=["office", "commercial"],
             complexity="complex"
         ),
         "packaged_rooftop": HVACTemplate(
             name="packaged_rooftop",
             description="Packaged Rooftop Unit - Common for small commercial buildings",
-            template_file=Path("templates/hvac/packaged_rooftop.idf"),
+            template_file=Path("resources/energyplus/templates/hvac/packaged_rooftop.idf"),
             suitable_for=["office", "retail", "commercial"],
             complexity="medium"
         ),
         "fan_coil": HVACTemplate(
             name="fan_coil",
             description="Fan Coil Units with Central Plant - Hotels, apartments",
-            template_file=Path("templates/hvac/fan_coil.idf"),
+            template_file=Path("resources/energyplus/templates/hvac/fan_coil.idf"),
             suitable_for=["residential", "hotel"],
             complexity="medium"
         ),

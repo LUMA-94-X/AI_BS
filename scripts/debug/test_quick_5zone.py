@@ -38,7 +38,7 @@ from features.simulation.runner import EnergyPlusRunner
 runner = EnergyPlusRunner()
 result = runner.run_simulation(
     idf_path=output_path,
-    weather_file=Path("data/weather/example.epw"),
+    weather_file=Path("resources/energyplus/weather/austria/example.epw"),
     output_dir=Path("test_quick_5zone_sim"),
     output_prefix="quick5",
 )

@@ -51,11 +51,11 @@ def main():
 
     # 4. Simulation ausführen
     print("\n4️⃣ Führe Simulation aus...")
-    weather_file = projekt_root / "data" / "weather" / "example.epw"
+    weather_file = projekt_root / "resources" / "energyplus" / "weather" / "austria" / "example.epw"
 
     if not weather_file.exists():
         print(f"   ❌ Wetterdatei nicht gefunden: {weather_file}")
-        print("   💡 Bitte example.epw in data/weather/ ablegen")
+        print("   💡 Bitte example.epw in resources/energyplus/weather/austria/ ablegen")
         return
 
     runner = EnergyPlusRunner()

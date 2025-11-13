@@ -109,7 +109,7 @@ class SimulationConfig(BaseModel):
 class WeatherConfig(BaseModel):
     """Weather data configuration."""
 
-    data_dir: str = "data/weather"
+    data_dir: str = "resources/energyplus/weather"
     default_file: str = ""
 
 

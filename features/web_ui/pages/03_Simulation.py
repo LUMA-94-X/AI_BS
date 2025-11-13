@@ -109,9 +109,9 @@ with col3:
 st.markdown("---")
 st.subheader("🌦️ Wetterdaten")
 
-weather_dir = Path("data/weather")
+weather_dir = Path("resources/energyplus/weather")
 if weather_dir.exists():
-    weather_files = list(weather_dir.glob("*.epw"))
+    weather_files = list(weather_dir.glob("**/*.epw"))  # Recursive search in subdirectories
     if weather_files:
         weather_file = st.selectbox(
             "Wetterdatei wählen:",
@@ -119,12 +119,13 @@ if weather_dir.exists():
             index=0,
             help="EPW-Datei mit stündlichen Wetterdaten für ein Jahr"
         )
-        weather_path = weather_dir / weather_file
+        # Find the selected file
+        weather_path = [f for f in weather_files if f.name == weather_file][0]
     else:
-        st.error("❌ Keine Wetterdateien gefunden in `data/weather/`")
+        st.error("❌ Keine Wetterdateien gefunden in `resources/energyplus/weather/`")
         st.stop()
 else:
-    st.error("❌ Verzeichnis `data/weather/` nicht gefunden")
+    st.error("❌ Verzeichnis `resources/energyplus/weather/` nicht gefunden")
     st.stop()
 
 # Ausgabeverzeichnis
@@ -372,7 +373,7 @@ with st.expander("❓ Hilfe: Simulation schlägt fehl"):
 
     2. **Wetterdatei fehlt**
        - Laden Sie eine EPW-Datei von https://energyplus.net/weather
-       - Legen Sie sie in `data/weather/` ab
+       - Legen Sie sie in `resources/energyplus/weather/` ab
 
     3. **IDF-Fehler**
        - Prüfen Sie die Gebäudeparameter
