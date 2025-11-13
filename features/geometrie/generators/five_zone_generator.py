@@ -1,6 +1,6 @@
 """5-Zone Generator für EnergyPlus-Modelle aus Energieausweis-Daten."""
 
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, List
 from pathlib import Path
 import tempfile
 
@@ -22,6 +22,15 @@ from features.geometrie.utils.fenster_distribution import (
 )
 from features.internal_loads.native_loads import NativeInternalLoadsManager
 
+# NEW: Import refactored modules
+from .modules import (
+    EppyBugFixer,
+    MetadataGenerator,
+    ZoneGenerator,
+    MaterialsGenerator
+)
+from .models import MetadataConfig, ZoneInfo
+
 
 class FiveZoneGenerator:
     """Generator für 5-Zonen-Gebäudemodelle (Perimeter N/E/S/W + Kern)."""
@@ -34,9 +43,17 @@ class FiveZoneGenerator:
             config: Configuration object. If None, uses global config.
         """
         self.config = config or get_config()
+
+        # Geometry utilities
         self.geometry_solver = GeometrySolver()
         self.perimeter_calc = PerimeterCalculator()
         self.fenster_dist = FensterDistribution()
+
+        # NEW: Generator modules
+        self.metadata_gen = MetadataGenerator(MetadataConfig())
+        self.materials_gen = MaterialsGenerator()
+        self.zone_gen = ZoneGenerator()
+        self.eppy_fixer = EppyBugFixer(debug=False)  # Set to True for debugging
 
     def create_from_energieausweis(
         self,
@@ -220,103 +237,12 @@ class FiveZoneGenerator:
         return idf
 
     def _collect_boundary_map(self, idf: IDF) -> dict:
-        """
-        Sammelt Boundary Objects VOR dem eppy Save (da save diese korrupt!).
-
-        Returns:
-            dict: {surface_name: correct_boundary_object_name}
-        """
-        boundary_map = {}
-        for surf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]:
-            if surf.Outside_Boundary_Condition == "Surface":
-                boundary_map[surf.Name] = surf.Outside_Boundary_Condition_Object
-                # DEBUG
-                if "Perimeter_North_F1_Wall_To_Core" in surf.Name or "Core_F1_Wall_To_North" in surf.Name:
-                    print(f"  DEBUG boundary_map: {surf.Name} → {surf.Outside_Boundary_Condition_Object}")
-        return boundary_map
+        """Delegiert zu EppyBugFixer."""
+        return self.eppy_fixer.collect_boundary_map(idf)
 
     def _fix_eppy_boundary_objects(self, boundary_map: dict, output_path: Path) -> None:
-        """
-        WORKAROUND für eppy Bug: Outside_Boundary_Condition_Object wird beim Save überschrieben.
-
-        Eppy setzt fälschlicherweise Outside_Boundary_Condition_Object = Name (Self-Reference).
-        Diese Methode korrigiert das IDF-File nach dem Save.
-
-        Args:
-            boundary_map: Pre-collected boundary objects BEFORE save
-            output_path: Path to the saved IDF file
-        """
-        # 1. Lese gespeicherte IDF-Datei
-        with open(output_path, 'r') as f:
-            idf_content = f.read()
-
-        # 2. Korrigiere jede falsche Self-Reference mit den vorher gesammelten Werten
-        # WICHTIG: Wir müssen jeden Surface-Block einzeln finden und NUR dessen Boundary-Zeile ersetzen!
-        # Nicht nach dem Boundary-Wert suchen (das führt zu Interferenzen zwischen Paaren)!
-        corrections = 0
-        import re
-
-        for surf_name, correct_boundary in boundary_map.items():
-            # Pattern: Finde den BUILDINGSURFACE:DETAILED Block für diese spezifische Surface
-            # und ersetze NUR die Boundary Object Zeile IN DIESEM Block
-            # Format:
-            # BUILDINGSURFACE:DETAILED,
-            #     SurfaceName,    !- Name
-            #     Wall,           !- Surface Type
-            #     ...
-            #     Surface,        !- Outside Boundary Condition
-            #     <WRONG_VALUE>,  !- Outside Boundary Condition Object  <- DIESE Zeile ersetzen!
-
-            pattern = (
-                rf'(BUILDINGSURFACE:DETAILED,\s+'  # Start of block
-                rf'{re.escape(surf_name)},\s+!- Name\s+'  # This surface's name
-                rf'.*?'  # Any lines in between (non-greedy)
-                rf'Surface,\s+!- Outside Boundary Condition\s+'  # The "Surface" boundary condition
-                rf')(\S+)(,\s+!- Outside Boundary Condition Object)'  # Capture old value
-            )
-
-            # Replacement: Keep everything before, replace value, keep comment
-            replacement = rf'\1{correct_boundary}\3'
-
-            new_content, count = re.subn(pattern, replacement, idf_content, flags=re.DOTALL)
-            if count > 0:
-                idf_content = new_content
-                corrections += count
-                # DEBUG
-                print(f"  DEBUG fixed: {surf_name[:40]:40} → {correct_boundary[:40]:40} (blocks={count})")
-
-        # 3. Schreibe korrigiertes IDF zurück
-        if corrections > 0:
-            print(f"  DEBUG: Writing corrected IDF to {output_path}")
-            print(f"  DEBUG: File size before: {output_path.stat().st_size if output_path.exists() else 0} bytes")
-            with open(output_path, 'w') as f:
-                f.write(idf_content)
-            print(f"  DEBUG: File size after: {output_path.stat().st_size} bytes")
-
-            # DEBUG: Verify the fix was actually written
-            with open(output_path, 'r') as f:
-                verify_content = f.read()
-                # Simple string search for specific corrected values
-                if "Core_F1_Wall_To_North," in verify_content:
-                    print(f"  ✅ VERIFY: Found 'Core_F1_Wall_To_North' in file")
-                else:
-                    print(f"  ❌ VERIFY: 'Core_F1_Wall_To_North' NOT found in file!")
-
-                # Check what's actually on the Outside Boundary Condition Object lines
-                import re
-                # Find lines specifically after "Surface," (Outside Boundary Condition)
-                blocks = re.findall(
-                    r'(^\s+\S+,\s+!- Name\n(?:.*\n){5}^\s+Surface,\s+!- Outside Boundary Condition\n^\s+(\S+),\s+!- Outside Boundary Condition Object)',
-                    verify_content,
-                    flags=re.MULTILINE
-                )
-                print(f"  DEBUG VERIFY: Found {len(blocks)} surface-type blocks")
-                for i, (block, boundary) in enumerate(blocks[:3]):
-                    print(f"    Block {i+1} boundary: {boundary}")
-
-            print(f"  🔧 Fixed {corrections} eppy boundary object bugs")
-        else:
-            print(f"  No eppy boundary object bugs found (this is unexpected!)")
+        """Delegiert zu EppyBugFixer."""
+        self.eppy_fixer.fix_eppy_boundary_objects(boundary_map, output_path)
 
     # ========================================================================
     # IDF INITIALIZATION
@@ -403,19 +329,8 @@ class FiveZoneGenerator:
         idf: IDF,
         ea_data: EnergieausweisInput
     ) -> None:
-        """
-        Erstellt Konstruktionen basierend auf U-Werten aus Energieausweis.
-
-        Verwendet reverse-engineering: Passt Dämmstoffdicke an U-Wert an.
-        """
-        # Für jetzt: Nutze Standard-Konstruktionen
-        # TODO Sprint 4: U-Wert-Mapping implementieren
-        add_basic_constructions(idf)
-
-        # Platzhalter für zukünftige U-Wert-basierte Konstruktionen
-        # self._create_construction_from_u_value(idf, "Wall", ea_data.u_wert_wand)
-        # self._create_construction_from_u_value(idf, "Roof", ea_data.u_wert_dach)
-        # ...
+        """Delegiert zu MaterialsGenerator."""
+        self.materials_gen.add_constructions_from_u_values(idf, ea_data)
 
     # ========================================================================
     # SIMULATION SETTINGS
@@ -426,134 +341,9 @@ class FiveZoneGenerator:
         idf: IDF,
         geo_solution: GeometrySolution
     ) -> None:
-        """Fügt Simulation Control, Building, Timestep, etc. hinzu."""
-
-        # SimulationControl
-        # NOTE: Zone/System Sizing auf No, da IdealLoads verwendet wird (braucht kein Sizing)
-        # Nur Annual Simulation (Weather File Run Periods) wird ausgeführt
-        idf.newidfobject(
-            "SIMULATIONCONTROL",
-            Do_Zone_Sizing_Calculation="No",  # Disabled: IdealLoads braucht kein Sizing
-            Do_System_Sizing_Calculation="No",  # Disabled: IdealLoads braucht kein Sizing
-            Do_Plant_Sizing_Calculation="No",
-            Run_Simulation_for_Sizing_Periods="No",
-            Run_Simulation_for_Weather_File_Run_Periods="Yes",  # ENABLED: Annual Simulation!
-        )
-
-        # HeatBalanceAlgorithm
-        idf.newidfobject(
-            "HEATBALANCEALGORITHM",
-            Algorithm="ConductionTransferFunction",
-        )
-
-        # Building
-        idf.newidfobject(
-            "BUILDING",
-            Name="5Zone_Building_From_Energieausweis",
-            North_Axis=0.0,  # Orientation handled via surface coordinates
-            Terrain="Suburbs",
-            Loads_Convergence_Tolerance_Value=0.04,
-            Temperature_Convergence_Tolerance_Value=0.4,
-            Solar_Distribution="FullExterior",
-            Maximum_Number_of_Warmup_Days=25,
-            Minimum_Number_of_Warmup_Days=6,
-        )
-
-        # NOTE: GlobalGeometryRules is now added in _initialize_idf()
-        # immediately after VERSION (critical for proper geometry parsing)
-
-        # Timestep (4 per hour)
-        idf.newidfobject("TIMESTEP", Number_of_Timesteps_per_Hour=4)
-
-        # RunPeriod (Jahressimulation)
-        idf.newidfobject(
-            "RUNPERIOD",
-            Name="Annual",
-            Begin_Month=1,
-            Begin_Day_of_Month=1,
-            Begin_Year=2024,
-            End_Month=12,
-            End_Day_of_Month=31,
-            End_Year=2024,
-            Day_of_Week_for_Start_Day="Monday",
-            Use_Weather_File_Holidays_and_Special_Days="Yes",
-            Use_Weather_File_Daylight_Saving_Period="Yes",
-            Apply_Weekend_Holiday_Rule="No",
-            Use_Weather_File_Rain_Indicators="Yes",
-            Use_Weather_File_Snow_Indicators="Yes",
-        )
-
-        # SizingPeriod:DesignDay (Heizen)
-        idf.newidfobject(
-            "SIZINGPERIOD:DESIGNDAY",
-            Name="Heating_Design_Day",
-            Month=1,
-            Day_of_Month=21,
-            Day_Type="WinterDesignDay",
-            Maximum_DryBulb_Temperature=-10.0,
-            Daily_DryBulb_Temperature_Range=0.0,
-            DryBulb_Temperature_Range_Modifier_Type="",
-            DryBulb_Temperature_Range_Modifier_Day_Schedule_Name="",
-            Humidity_Condition_Type="WetBulb",
-            Wetbulb_or_DewPoint_at_Maximum_DryBulb="-10.0",
-            Humidity_Condition_Day_Schedule_Name="",
-            Humidity_Ratio_at_Maximum_DryBulb="",
-            Enthalpy_at_Maximum_DryBulb="",
-            Daily_WetBulb_Temperature_Range="",
-            Barometric_Pressure=101325,
-            Wind_Speed=4.5,
-            Wind_Direction=0,
-            Rain_Indicator="No",
-            Snow_Indicator="No",
-            Daylight_Saving_Time_Indicator="No",
-            Solar_Model_Indicator="ASHRAEClearSky",
-            Beam_Solar_Day_Schedule_Name="",
-            Diffuse_Solar_Day_Schedule_Name="",
-            ASHRAE_Clear_Sky_Optical_Depth_for_Beam_Irradiance_taub="",
-            ASHRAE_Clear_Sky_Optical_Depth_for_Diffuse_Irradiance_taud="",
-            Sky_Clearness="",
-        )
-
-        # SizingPeriod:DesignDay (Kühlen)
-        idf.newidfobject(
-            "SIZINGPERIOD:DESIGNDAY",
-            Name="Cooling_Design_Day",
-            Month=7,
-            Day_of_Month=21,
-            Day_Type="SummerDesignDay",
-            Maximum_DryBulb_Temperature=32.0,
-            Daily_DryBulb_Temperature_Range=10.0,
-            DryBulb_Temperature_Range_Modifier_Type="",
-            DryBulb_Temperature_Range_Modifier_Day_Schedule_Name="",
-            Humidity_Condition_Type="WetBulb",
-            Wetbulb_or_DewPoint_at_Maximum_DryBulb="23.0",
-            Humidity_Condition_Day_Schedule_Name="",
-            Humidity_Ratio_at_Maximum_DryBulb="",
-            Enthalpy_at_Maximum_DryBulb="",
-            Daily_WetBulb_Temperature_Range="",
-            Barometric_Pressure=101325,
-            Wind_Speed=4.0,
-            Wind_Direction=180,
-            Rain_Indicator="No",
-            Snow_Indicator="No",
-            Daylight_Saving_Time_Indicator="No",
-            Solar_Model_Indicator="ASHRAEClearSky",
-            Beam_Solar_Day_Schedule_Name="",
-            Diffuse_Solar_Day_Schedule_Name="",
-            ASHRAE_Clear_Sky_Optical_Depth_for_Beam_Irradiance_taub="",
-            ASHRAE_Clear_Sky_Optical_Depth_for_Diffuse_Irradiance_taud="",
-            Sky_Clearness="",
-        )
-
-        # Site:Location (Placeholder - Deutschland, Mitteleuropa)
-        idf.newidfobject(
-            "SITE:LOCATION",
-            Name="Germany_Central",
-            Latitude=51.0,
-            Longitude=10.0,
-            Time_Zone=1.0,
-            Elevation=200.0,
-        )
+        """Delegiert zu MetadataGenerator."""
+        self.metadata_gen.add_simulation_settings(idf, geo_solution)
+        self.metadata_gen.add_site_location(idf)
 
     # ========================================================================
     # ZONES
@@ -563,30 +353,9 @@ class FiveZoneGenerator:
         self,
         idf: IDF,
         layouts: Dict[int, ZoneLayout]
-    ) -> None:
-        """Erstellt alle thermischen Zonen."""
-
-        for floor_num, layout in layouts.items():
-            for orient, zone_geom in layout.all_zones.items():
-                idf.newidfobject(
-                    "ZONE",
-                    Name=zone_geom.name,
-                    Direction_of_Relative_North=0,
-                    X_Origin=zone_geom.x_origin,
-                    Y_Origin=zone_geom.y_origin,
-                    Z_Origin=zone_geom.z_origin,
-                    Type="",
-                    Multiplier=1,
-                    Ceiling_Height=zone_geom.height,
-                    Volume=zone_geom.volume,
-                    Floor_Area="",
-                    Zone_Inside_Convection_Algorithm="",
-                    Zone_Outside_Convection_Algorithm="",
-                    Part_of_Total_Floor_Area="Yes",
-                )
-
-                # HINWEIS: SIZING:ZONE nicht mehr erstellt, da Sizing deaktiviert ist
-                # (IdealLoads braucht kein Sizing, Annual Simulation läuft ohne)
+    ) -> List[ZoneInfo]:
+        """Delegiert zu ZoneGenerator. Returns ZoneInfo list."""
+        return self.zone_gen.add_zones(idf, layouts)
 
     # ========================================================================
     # SURFACES (WALLS, FLOORS, CEILINGS, WINDOWS)
@@ -1345,35 +1114,5 @@ class FiveZoneGenerator:
     # ========================================================================
 
     def _add_output_variables(self, idf: IDF) -> None:
-        """Fügt Output Variables hinzu - für IdealLoads HVAC System."""
-
-        # Output-Variablen für IdealLoads HVAC
-        outputs = [
-            ("Zone Mean Air Temperature", "Hourly"),
-            ("Zone Air System Sensible Heating Energy", "Hourly"),
-            ("Zone Air System Sensible Cooling Energy", "Hourly"),
-            ("Zone Ideal Loads Zone Total Heating Energy", "Hourly"),
-            ("Zone Ideal Loads Zone Total Cooling Energy", "Hourly"),
-            ("Zone Ideal Loads Supply Air Total Heating Energy", "Hourly"),
-            ("Zone Ideal Loads Supply Air Total Cooling Energy", "Hourly"),
-        ]
-
-        for var_name, freq in outputs:
-            idf.newidfobject(
-                "OUTPUT:VARIABLE",
-                Key_Value="*",
-                Variable_Name=var_name,
-                Reporting_Frequency=freq,
-            )
-
-        # Output:SQLite für Ergebnis-Analyse
-        idf.newidfobject(
-            "OUTPUT:SQLITE",
-            Option_Type="SimpleAndTabular",
-        )
-
-        # Output:Table:SummaryReports für Zusammenfassung
-        idf.newidfobject(
-            "OUTPUT:TABLE:SUMMARYREPORTS",
-            Report_1_Name="AllSummary",
-        )
+        """Delegiert zu MetadataGenerator."""
+        self.metadata_gen.add_output_variables(idf)
