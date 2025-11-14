@@ -36,6 +36,28 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ### Added - 2025-11-14
 
+#### 🧭 Zonale Auswertung - Nord/Ost/Süd/West/Kern Vergleich
+- **Neues Feature**: Vergleich der 5 Gebäudezonen (Quick Win!)
+- **Datenklassen** (`tabular_reports.py`):
+  - `ZoneData`: Temperaturen, Lasten, Gewinne pro Zone
+  - `ZonalComparison`: Container mit Properties für einfachen Zugriff
+- **Parser-Methode**: `get_zonal_comparison()`
+  - Extrahiert aus ReportVariableData (Zeitreihen)
+  - Aggregiert AVG/MIN/MAX/SUM pro Zone und Variable
+  - Automatische Orientierungserkennung (North/East/South/West/Core)
+- **Metriken pro Zone**:
+  - Temperaturen: Durchschnitt, Min, Max
+  - Heiz-/Kühllast: kWh pro Jahr
+  - Solare Gewinne: kWh (zeigt Orientierungs-Effekte!)
+  - Innere Gewinne: Lights + Equipment + People
+- **Erkenntnisse aus Testdaten**:
+  - Solare Gewinne variieren stark: Nord 1.074 kWh > Süd 716 kWh > Ost 303 kWh > West 241 kWh
+  - Temperaturen relativ gleichmäßig (23-25°C)
+  - Kern-Zone: Keine solaren Gewinne (keine Fenster)
+- **Vorteil**: Daten bereits in SQL verfügbar → Instant-Zugriff
+- **Betroffene Datei**: `features/auswertung/tabular_reports.py` (+120 Zeilen)
+- **Status**: Parser fertig, UI-Integration folgt
+
 #### 📊 Tabular Reports - Erweiterte EnergyPlus Auswertung
 - **Neues Modul**: `features/auswertung/tabular_reports.py`
   - `TabularReportParser` Klasse zur Auswertung vorgefertigter EnergyPlus Summary Reports

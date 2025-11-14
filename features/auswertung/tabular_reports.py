@@ -111,6 +111,55 @@ class EnvelopePerformance:
     roof_u_value: Optional[float] = None
 
 
+@dataclass
+class ZoneData:
+    """Daten für eine einzelne Zone"""
+    zone_name: str = ""
+    orientation: str = ""  # North, East, South, West, Core
+
+    # Temperaturen
+    avg_temperature_c: float = 0.0
+    min_temperature_c: float = 0.0
+    max_temperature_c: float = 0.0
+
+    # Lasten (kWh)
+    heating_kwh: float = 0.0
+    cooling_kwh: float = 0.0
+
+    # Gewinne (kWh)
+    solar_gains_kwh: float = 0.0
+    internal_gains_kwh: float = 0.0  # Lights + Equipment + People
+    lights_kwh: float = 0.0
+    equipment_kwh: float = 0.0
+    people_kwh: float = 0.0
+
+
+@dataclass
+class ZonalComparison:
+    """Vergleich aller Zonen"""
+    zones: Dict[str, ZoneData]  # zone_name -> ZoneData
+
+    @property
+    def north_zone(self) -> Optional[ZoneData]:
+        return next((z for z in self.zones.values() if z.orientation == "North"), None)
+
+    @property
+    def east_zone(self) -> Optional[ZoneData]:
+        return next((z for z in self.zones.values() if z.orientation == "East"), None)
+
+    @property
+    def south_zone(self) -> Optional[ZoneData]:
+        return next((z for z in self.zones.values() if z.orientation == "South"), None)
+
+    @property
+    def west_zone(self) -> Optional[ZoneData]:
+        return next((z for z in self.zones.values() if z.orientation == "West"), None)
+
+    @property
+    def core_zone(self) -> Optional[ZoneData]:
+        return next((z for z in self.zones.values() if z.orientation == "Core"), None)
+
+
 class TabularReportParser:
     """
     Parser für EnergyPlus Tabular Reports.
@@ -476,3 +525,114 @@ class TabularReportParser:
             DataFrame mit allen Daten des Reports
         """
         return self._get_tabular_data(report_name)
+
+    def get_zonal_comparison(self) -> ZonalComparison:
+        """
+        Extrahiert zonale Daten für Vergleich (Nord/Ost/Süd/West/Kern).
+
+        Verwendet Zeitreihen-Daten aus ReportVariableData.
+
+        Returns:
+            ZonalComparison mit Daten für alle Zonen
+        """
+        conn = sqlite3.connect(self.sql_file)
+        try:
+            # Query für alle Zonen und ihre Variablen
+            query = """
+            SELECT
+                d.KeyValue as ZoneName,
+                d.VariableName,
+                AVG(v.VariableValue) as AvgValue,
+                MIN(v.VariableValue) as MinValue,
+                MAX(v.VariableValue) as MaxValue,
+                SUM(v.VariableValue) as SumValue
+            FROM ReportVariableData v
+            JOIN ReportVariableDataDictionary d
+                ON v.ReportVariableDataDictionaryIndex = d.ReportVariableDataDictionaryIndex
+            WHERE d.KeyValue IN ('PERIMETER_NORTH_F1', 'PERIMETER_EAST_F1', 'PERIMETER_SOUTH_F1', 'PERIMETER_WEST_F1', 'CORE_F1')
+              AND (
+                  d.VariableName LIKE '%Zone Mean Air Temperature%'
+                  OR d.VariableName LIKE '%Ideal Loads Zone Total Heating Rate%'
+                  OR d.VariableName LIKE '%Ideal Loads Zone Total Cooling Rate%'
+                  OR d.VariableName LIKE '%Zone Lights Total Heating Energy%'
+                  OR d.VariableName LIKE '%Zone Electric Equipment Total Heating Energy%'
+                  OR d.VariableName LIKE '%Zone People Total Heating Energy%'
+                  OR d.VariableName LIKE '%Zone Windows Total Heat Gain Energy%'
+              )
+            GROUP BY d.KeyValue, d.VariableName
+            """
+
+            df = pd.read_sql_query(query, conn)
+
+            if df.empty:
+                return ZonalComparison(zones={})
+
+            # Parse Orientierung aus ZoneName
+            def get_orientation(zone_name: str) -> str:
+                zone_lower = zone_name.lower()
+                if 'north' in zone_lower:
+                    return 'North'
+                elif 'east' in zone_lower:
+                    return 'East'
+                elif 'south' in zone_lower:
+                    return 'South'
+                elif 'west' in zone_lower:
+                    return 'West'
+                elif 'core' in zone_lower:
+                    return 'Core'
+                return 'Unknown'
+
+            # Konvertierungsfaktor: Timestep-Daten zu kWh
+            # EnergyPlus speichert Energy in J, Rate in W
+            # Annahme: 8760 Timesteps pro Jahr, 1h pro Timestep
+            J_TO_KWH = 1 / 3600000.0  # 1 J = 1/3600000 kWh
+
+            zones_data = {}
+
+            for zone_name in df['ZoneName'].unique():
+                zone_df = df[df['ZoneName'] == zone_name]
+
+                # Helper: Wert extrahieren
+                def get_val(var_pattern: str, stat: str = 'AvgValue') -> float:
+                    row = zone_df[zone_df['VariableName'].str.contains(var_pattern, na=False)]
+                    if row.empty:
+                        return 0.0
+                    return float(row.iloc[0][stat])
+
+                zone_data = ZoneData(
+                    zone_name=zone_name,
+                    orientation=get_orientation(zone_name),
+
+                    # Temperaturen (°C)
+                    avg_temperature_c=get_val('Zone Mean Air Temperature', 'AvgValue'),
+                    min_temperature_c=get_val('Zone Mean Air Temperature', 'MinValue'),
+                    max_temperature_c=get_val('Zone Mean Air Temperature', 'MaxValue'),
+
+                    # Lasten: Rate (W) → kWh
+                    # SUM(Rate in W) / Timesteps per hour / 1000 → kWh
+                    # Bei hourly timesteps: SUM(W) / 1000 → kWh
+                    heating_kwh=get_val('Heating Rate', 'SumValue') / 1000.0,  # Sum of W → kWh
+                    cooling_kwh=get_val('Cooling Rate', 'SumValue') / 1000.0,  # Sum of W → kWh
+
+                    # Gewinne: Energy (J) → kWh
+                    solar_gains_kwh=get_val('Windows Total Heat Gain Energy', 'SumValue') * J_TO_KWH,
+                    lights_kwh=get_val('Lights Total Heating Energy', 'SumValue') * J_TO_KWH,
+                    equipment_kwh=get_val('Electric Equipment Total Heating Energy', 'SumValue') * J_TO_KWH,
+                    people_kwh=get_val('People Total Heating Energy', 'SumValue') * J_TO_KWH,
+                )
+
+                zone_data.internal_gains_kwh = (
+                    zone_data.lights_kwh +
+                    zone_data.equipment_kwh +
+                    zone_data.people_kwh
+                )
+
+                zones_data[zone_name] = zone_data
+
+            return ZonalComparison(zones=zones_data)
+
+        except Exception as e:
+            print(f"Warning: Could not extract zonal comparison: {e}")
+            return ZonalComparison(zones={})
+        finally:
+            conn.close()
