@@ -6,6 +6,14 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
+from .tabular_reports import (
+    TabularReportParser,
+    EndUseSummary,
+    SiteSourceEnergy,
+    HVACSizing,
+    EnvelopePerformance
+)
+
 
 @dataclass
 class ErgebnisUebersicht:
@@ -245,6 +253,41 @@ class EnergyPlusSQLParser:
         query = "SELECT DISTINCT Name FROM ReportDataDictionary ORDER BY Name"
         cursor = self.conn.execute(query)
         return [row[0] for row in cursor.fetchall()]
+
+    def get_tabular_summaries(self) -> Dict[str, any]:
+        """Get pre-aggregated tabular summaries from EnergyPlus reports.
+
+        Diese Methode nutzt vorgefertigte EnergyPlus Summary Reports,
+        die bereits in der SQL-Datenbank aggregiert sind. Keine manuelle
+        Summierung von Zeitreihen erforderlich!
+
+        Returns:
+            Dictionary mit allen verfügbaren Summaries:
+            - 'end_uses': EndUseSummary (Verbrauchsaufteilung)
+            - 'site_source_energy': SiteSourceEnergy (Primärenergie)
+            - 'hvac_sizing': HVACSizing (Design-Lasten)
+            - 'envelope': EnvelopePerformance (Gebäudehülle)
+        """
+        parser = TabularReportParser(self.sql_file)
+        return parser.get_all_summaries()
+
+    def get_end_use_breakdown(self) -> EndUseSummary:
+        """Get detailed end-use breakdown from tabular reports.
+
+        Returns:
+            EndUseSummary mit Aufteilung nach Verwendungszweck
+        """
+        parser = TabularReportParser(self.sql_file)
+        return parser.get_end_use_summary()
+
+    def get_hvac_design_loads(self) -> HVACSizing:
+        """Get HVAC design loads from tabular reports.
+
+        Returns:
+            HVACSizing mit Auslegungslasten
+        """
+        parser = TabularReportParser(self.sql_file)
+        return parser.get_hvac_sizing()
 
 
 def parse_ergebnisse(sql_file: Path | str) -> ErgebnisUebersicht:

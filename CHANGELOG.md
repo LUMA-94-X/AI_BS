@@ -6,6 +6,131 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ## [Unreleased]
 
+### Added - 2025-11-14
+
+#### 📊 Tabular Reports - Erweiterte EnergyPlus Auswertung
+- **Neues Modul**: `features/auswertung/tabular_reports.py`
+  - `TabularReportParser` Klasse zur Auswertung vorgefertigter EnergyPlus Summary Reports
+  - 4 Datenklassen: `EndUseSummary`, `SiteSourceEnergy`, `HVACSizing`, `EnvelopePerformance`
+  - Direkter Zugriff auf 25+ vorgefertigte EnergyPlus Reports aus SQL-Datenbank
+  - **Vorteil**: Keine manuelle Summierung von 8760 Zeitreihen-Werten erforderlich!
+
+- **SQL-Parser Integration**:
+  - Neue Methoden in `EnergyPlusSQLParser`:
+    - `get_tabular_summaries()` - Alle Reports auf einmal
+    - `get_end_use_breakdown()` - Detaillierte Verbrauchsaufteilung
+    - `get_hvac_design_loads()` - HVAC Auslegungslasten
+
+- **KPI-Rechner erweitert**:
+  - Neue Datenklasse `ErweiterteKennzahlen` mit Tabular Data
+  - Neue Methode `berechne_erweiterte_kennzahlen()` kombiniert Standard- und Tabular-Metriken
+
+- **Neue Visualisierungen** (`visualisierung.py`):
+  - `erstelle_detailliertes_end_use_chart()` - Pie Chart mit Fans, Pumps, Sonstiges
+  - `erstelle_hvac_design_loads_chart()` - Absolute & spezifische Lasten
+  - `erstelle_site_source_energy_chart()` - Site vs. Source Energy Vergleich
+  - `erstelle_erweiterte_uebersicht()` - Dashboard mit allen Tabular Reports
+
+- **UI-Integration** (Ergebnisse-Seite):
+  - **Neuer Sub-Tab**: "📈 Tabular Reports (Erweitert)" unter "Energetische Auswertung"
+  - Metriken-Anzeige:
+    - **End Use Breakdown**: Heizung, Kühlung, Beleuchtung, Geräte, Ventilatoren, Pumpen
+    - **Energieträger**: Strom vs. Gas Aufschlüsselung
+    - **Site vs. Source Energy**: Endenergie vs. Primärenergie Vergleich
+    - **HVAC Design Loads**: Heiz-/Kühllast mit Auslegungstag-Info
+    - **Envelope**: Wandfläche, Fensterfläche, Dachfläche mit U-Werten
+  - Interaktive Plotly Charts für alle Metriken
+  - Button "Erweiterte Übersicht anzeigen" für kombiniertes Dashboard
+
+- **Vorteile der Tabular Reports**:
+  - ✅ Instant-Zugriff auf aggregierte Daten (keine Zeitreihen-Summierung)
+  - ✅ 95% ungenutztes EnergyPlus-Potential jetzt verfügbar
+  - ✅ Detailliertere End-Use Breakdown (inkl. Fans, Pumps)
+  - ✅ Primärenergie-Analyse (Site vs. Source)
+  - ✅ HVAC-Dimensionierung (Design Loads mit Auslegungstag)
+
+#### 🏭 Gebäudetechnik-Systeme: Trennung von Heiz- und Lüftungssystem
+- **HVAC-Seite erweitert**:
+  - Separate Auswahl für **Heizsystem** (Wärmeerzeuger):
+    - Ideal Loads Air System
+    - Gas-Brennwertkessel
+    - Öl-Brennwertkessel
+    - Biomasse-Kessel
+    - Wärmepumpe
+    - Fernwärme / Fernwärme KWK / Fernwärme Heizwerk
+  - Separate Auswahl für **Lüftungssystem**:
+    - Ideal Loads Air System
+    - Mechanische Lüftung mit WRG (Wärmerückgewinnung)
+    - Mechanische Lüftung ohne WRG
+    - Natürliche Lüftung
+  - Anzeige von OIB RL6 Konversionsfaktoren für gewähltes Heizsystem
+  - Systemeigenschaften-Darstellung (WRG-Effizienz, etc.)
+
+#### 📊 OIB RL6 Konversionsfaktoren-Modul
+- **Neues Modul**: `data/oib_konversionsfaktoren.py`
+  - Vollständige Implementierung von OIB RL6 § 7 (Tabelle 7)
+  - 11 Energieträger mit Primärenergie- und CO₂-Faktoren:
+    - Kohle, Heizöl, Erdgas, Biomasse
+    - Strom-Mix Österreich
+    - Fernwärme (erneuerbar/fossil/KWK)
+    - Abwärme
+  - Mapping von HVAC-Systemen zu Referenz-Wärmeerzeugern (OIB RL6 § 9.2)
+  - Berechnungsfunktionen: `berechne_peb()`, `berechne_co2()`
+
+#### 🔋 Primärenergiebedarf (PEB) & CO₂-Berechnung
+- **PEB-Berechnung implementiert**:
+  - Formel: `PEB = EEB × f_PE` (Endenergiebedarf × Primärenergiefaktor)
+  - Abhängig vom gewählten Heizsystem
+  - Automatische Berechnung wenn HVAC-System konfiguriert
+- **CO₂-Berechnung implementiert**:
+  - Formel: `CO₂ = EEB × f_CO₂` (in kg/m²a)
+  - Systemspezifische Emissionsfaktoren
+- **Energieausweis-Anzeige**:
+  - PEB und CO₂ zeigen berechnete Werte statt "k.A."
+  - Info-Box zeigt verwendetes Heiz-/Lüftungssystem
+  - Warnung wenn kein System gewählt (PEB nicht berechenbar)
+
+#### 🏗️ Mittlerer U-Wert Übertragung
+- **Geometrie → Energieausweis**:
+  - Flächengewichteter U-Wert aus Geometrie-Eingabe
+  - Automatisch in `geometry_summary['oib_mittlerer_u_wert']` gespeichert
+  - Korrekte Anzeige im Energieausweis statt "k.A."
+
+### Changed - 2025-11-14
+
+#### 🔄 HVAC-Konfigurationsstruktur erweitert
+- `hvac_config` enthält jetzt:
+  - `type`: Legacy-Feld (=Heizsystem für Kompatibilität)
+  - `heating_system`: Neues Feld für Wärmeerzeuger
+  - `ventilation_system`: Neues Feld für Lüftungsart
+- Rückwärtskompatibilität gewährleistet durch Fallback-Logik
+
+#### 📊 Kennzahlen-Berechnung erweitert
+- `kpi_rechner.py`:
+  - Liest `hvac_config` aus `building_model` (dict oder Pydantic-Objekt)
+  - Verwendet `heating_system` für PEB/CO₂-Berechnung
+  - Extrahiert `oib_mittlerer_u_wert` aus `geometry_summary`
+- `04_Ergebnisse.py`:
+  - Konvertiert Pydantic `BuildingModel` zu dict für `hvac_config`-Übergabe
+  - Zeigt verwendete Systeme im Energieausweis-Tab
+
+### Fixed - 2025-11-14
+
+#### 🐛 Streamlit UI-Fehler
+- **Problem**: `st.info()` unterstützt kein `unsafe_allow_html`
+- **Lösung**: Parameter entfernt, HTML-Subscripts zu Plain Text (f_GEE, ℓc)
+- Betroffen: Zeilen 533, 542 in `04_Ergebnisse.py`
+
+#### 🐛 HVAC Variable-Fehler
+- **Problem**: `NameError: name 'hvac_type' is not defined` in Konfigurationsübersicht
+- **Lösung**: Verwende Werte aus `session_state['hvac_config']` statt lokale Variablen
+- Betroffen: `02_HVAC.py:372`
+
+#### 🐛 Pydantic BuildingModel Kompatibilität
+- **Problem**: `"BuildingModel" object has no field "hvac_config"` (Pydantic erlaubt keine dynamischen Felder)
+- **Lösung**: Konvertierung zu dict mit `geometry_summary` + `hvac_config`
+- Betroffen: `04_Ergebnisse.py:88-95`
+
 ### Added - 2025-11-13
 
 #### 🇦🇹 Energieausweis-Erweiterung: Österreichische Kennzahlen

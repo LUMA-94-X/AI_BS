@@ -8,7 +8,7 @@ from datetime import datetime
 # Projekt-Root zum Path hinzufügen
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from features.auswertung.kpi_rechner import KennzahlenRechner
+from features.auswertung.kpi_rechner import KennzahlenRechner, ErweiterteKennzahlen
 from features.auswertung.visualisierung import ErgebnisVisualisierer
 from features.auswertung.sql_parser import EnergyPlusSQLParser
 
@@ -60,7 +60,8 @@ if building_model:
     # 5-Zone oder SimpleBox via BuildingModel
     geom_summary = get_attr_safe(building_model, 'geometry_summary', {})
     total_floor_area = geom_summary.get('total_floor_area', 0)
-    is_five_zone = get_source(building_model) == "energieausweis"
+    source = get_source(building_model)
+    is_five_zone = source in ["energieausweis", "oib_energieausweis"]
 elif 'geometry' in st.session_state:
     # Legacy SimpleBox
     geometry = st.session_state['geometry']
@@ -76,9 +77,36 @@ if total_floor_area == 0:
 
 # Lade Ergebnisse
 try:
-    # KPIs berechnen
-    rechner = KennzahlenRechner(total_floor_area)
+    # HVAC-Config aus session_state holen
+    hvac_config = st.session_state.get('hvac_config', {})
+
+    # Wenn building_model ein dict ist, füge hvac_config hinzu
+    if building_model and isinstance(building_model, dict):
+        building_model['hvac_config'] = hvac_config
+        building_model_with_hvac = building_model
+    # Wenn building_model ein Pydantic-Objekt ist, erstelle ein dict mit allen Daten
+    elif building_model:
+        # Konvertiere BuildingModel zu dict und füge hvac_config hinzu
+        building_model_dict = {
+            'source': getattr(building_model, 'source', None),
+            'geometry_summary': getattr(building_model, 'geometry_summary', {}),
+            'hvac_config': hvac_config
+        }
+        building_model_with_hvac = building_model_dict
+    else:
+        building_model_with_hvac = None
+
+    # KPIs berechnen (mit building_model für OIB-Metadaten inkl. hvac_config)
+    rechner = KennzahlenRechner(total_floor_area, building_model=building_model_with_hvac)
     kennzahlen = rechner.berechne_kennzahlen(sql_file=result.sql_file)
+
+    # Erweiterte Kennzahlen mit Tabular Reports berechnen
+    try:
+        erweiterte_kennzahlen = rechner.berechne_erweiterte_kennzahlen(sql_file=result.sql_file)
+        has_tabular_reports = True
+    except Exception:
+        erweiterte_kennzahlen = None
+        has_tabular_reports = False
 
     # Visualisierer erstellen
     viz = ErgebnisVisualisierer()
@@ -237,200 +265,583 @@ try:
     with tab2:
         st.subheader("📊 Detaillierte Energieanalyse")
 
-        # Jahresbilanz
-        st.markdown("### ⚡ Jahresbilanz")
-
-        col1, col2, col3 = st.columns(3)
+        # SUB-TABS für bessere Organisation
+        subtab1, subtab2, subtab3, subtab4 = st.tabs([
+            "📊 Grundwerte",
+            "🇦🇹 Energieausweis",
+            "📈 Tabular Reports (Erweitert)",
+            "📐 Standards & Tipps"
+        ])
 
         ergebnisse = kennzahlen.ergebnisse
 
-        with col1:
-            st.markdown("#### Heizung")
-            st.metric("Gesamt", f"{ergebnisse.heizbedarf_kwh:.0f} kWh")
-            st.metric("Spezifisch", f"{kennzahlen.heizkennzahl_kwh_m2a:.1f} kWh/m²a")
-            st.metric("Spitzenlast", f"{ergebnisse.spitzenlast_heizung_kw:.1f} kW")
+        # ===== SUB-TAB 1: GRUNDWERTE =====
+        with subtab1:
+            # Jahresbilanz
+            st.markdown("### ⚡ Jahresbilanz")
 
-        with col2:
-            st.markdown("#### Kühlung")
-            st.metric("Gesamt", f"{ergebnisse.kuehlbedarf_kwh:.0f} kWh")
-            st.metric("Spezifisch", f"{kennzahlen.kuehlkennzahl_kwh_m2a:.1f} kWh/m²a")
-            st.metric("Spitzenlast", f"{ergebnisse.spitzenlast_kuehlung_kw:.1f} kW")
+            col1, col2, col3 = st.columns(3)
 
-        with col3:
-            st.markdown("#### Gesamt")
-            st.metric("Gesamtenergie", f"{ergebnisse.gesamtenergiebedarf_kwh:.0f} kWh")
-            st.metric("Pro m²", f"{kennzahlen.energiekennzahl_kwh_m2a:.1f} kWh/m²a")
-            st.metric("Fläche", f"{kennzahlen.gesamtflaeche_m2:.1f} m²")
+            with col1:
+                st.markdown("#### Heizung")
+                st.metric("Gesamt", f"{ergebnisse.heizbedarf_kwh:.0f} kWh")
+                st.metric("Spezifisch", f"{kennzahlen.heizkennzahl_kwh_m2a:.1f} kWh/m²a")
+                st.metric("Spitzenlast", f"{ergebnisse.spitzenlast_heizung_kw:.1f} kW")
 
-        # Monatliche Übersicht
-        st.markdown("---")
-        st.markdown("### 📅 Monatliche Übersicht")
+            with col2:
+                st.markdown("#### Kühlung")
+                st.metric("Gesamt", f"{ergebnisse.kuehlbedarf_kwh:.0f} kWh")
+                st.metric("Spezifisch", f"{kennzahlen.kuehlkennzahl_kwh_m2a:.1f} kWh/m²a")
+                st.metric("Spitzenlast", f"{ergebnisse.spitzenlast_kuehlung_kw:.1f} kW")
 
-        parser = EnergyPlusSQLParser(result.sql_file)
-        monthly_df = parser.get_monthly_summary()
+            with col3:
+                st.markdown("#### Gesamt")
+                st.metric("Gesamtenergie", f"{ergebnisse.gesamtenergiebedarf_kwh:.0f} kWh")
+                st.metric("Pro m²", f"{kennzahlen.energiekennzahl_kwh_m2a:.1f} kWh/m²a")
+                st.metric("Fläche", f"{kennzahlen.gesamtflaeche_m2:.1f} m²")
 
-        if not monthly_df.empty:
-            # Erstelle HTML-Tabelle (ohne pyarrow)
-            html = "<table style='width:100%; border-collapse: collapse;'>"
-            html += "<thead><tr style='background-color: #f0f2f6;'>"
-            for col in monthly_df.columns:
-                html += f"<th style='padding: 8px; border: 1px solid #ddd;'>{col}</th>"
-            html += "</tr></thead><tbody>"
+            # Monatliche Übersicht
+            st.markdown("---")
+            st.markdown("### 📅 Monatliche Übersicht")
 
-            for idx, row in monthly_df.iterrows():
-                html += "<tr>"
+            parser = EnergyPlusSQLParser(result.sql_file)
+            monthly_df = parser.get_monthly_summary()
+
+            if not monthly_df.empty:
+                # Erstelle HTML-Tabelle (ohne pyarrow)
+                html = "<table style='width:100%; border-collapse: collapse;'>"
+                html += "<thead><tr style='background-color: #f0f2f6;'>"
                 for col in monthly_df.columns:
-                    val = row[col]
-                    if col != 'Monat' and isinstance(val, (int, float)):
-                        html += f"<td style='padding: 8px; border: 1px solid #ddd; text-align: right;'>{val:.1f}</td>"
-                    else:
-                        html += f"<td style='padding: 8px; border: 1px solid #ddd;'>{val}</td>"
-                html += "</tr>"
-            html += "</tbody></table>"
+                    html += f"<th style='padding: 8px; border: 1px solid #ddd;'>{col}</th>"
+                html += "</tr></thead><tbody>"
 
-            st.markdown(html, unsafe_allow_html=True)
+                for idx, row in monthly_df.iterrows():
+                    html += "<tr>"
+                    for col in monthly_df.columns:
+                        val = row[col]
+                        if col != 'Monat' and isinstance(val, (int, float)):
+                            html += f"<td style='padding: 8px; border: 1px solid #ddd; text-align: right;'>{val:.1f}</td>"
+                        else:
+                            html += f"<td style='padding: 8px; border: 1px solid #ddd;'>{val}</td>"
+                    html += "</tr>"
+                html += "</tbody></table>"
 
-            # Balkendiagramm
+                st.markdown(html, unsafe_allow_html=True)
+
+                # Balkendiagramm
+                st.markdown("")
+                import plotly.express as px
+                fig = px.bar(
+                    monthly_df,
+                    x='Monat',
+                    y=['Heizung_kWh', 'Kuehlung_kWh', 'Beleuchtung_kWh', 'Geraete_kWh'],
+                    title='Monatlicher Energieverbrauch',
+                    labels={'value': 'Energie (kWh)', 'variable': 'Kategorie'},
+                    barmode='stack',
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # CSV Download
+                csv = monthly_df.to_csv(index=False)
+                st.download_button(
+                    label="📅 Monatsdaten als CSV herunterladen",
+                    data=csv,
+                    file_name="monthly_summary.csv",
+                    mime="text/csv",
+                )
+
+        # ===== SUB-TAB 2: ENERGIEAUSWEIS =====
+        with subtab2:
+            st.markdown("### 🇦🇹 Energieausweis nach OIB RL6")
+            st.caption("Kennzahlen nach OIB-Richtlinie 6 (März 2015) - Abschnitt 11")
+
+            # Zeige verwendetes Heizsystem für PEB-Berechnung
+            if hvac_config:
+                heating_sys = hvac_config.get('heating_system') or hvac_config.get('type', 'k.A.')
+                ventilation_sys = hvac_config.get('ventilation_system', 'k.A.')
+
+                # Nur anzeigen wenn PEB berechnet wurde
+                if kennzahlen.peb_kwh_m2a is not None:
+                    st.info(f"""
+                    **Verwendete Systeme für Kennzahlen-Berechnung:**
+                    - 🔥 **Heizsystem:** {heating_sys} → PEB & CO₂-Berechnung
+                    - 🌬️ **Lüftungssystem:** {ventilation_sys}
+                    """)
+                else:
+                    st.warning(f"""
+                    ⚠️ **PEB & CO₂ nicht berechnet**
+                    - Heizsystem: {heating_sys}
+                    - Bitte wählen Sie ein Heizsystem auf der **HVAC-Seite** für vollständige Kennzahlen
+                    """)
+
+            # EFFIZIENZKLASSE NACH OIB RL6 TABELLE 8
+            st.markdown("#### 🏆 Energieeffizienzklasse")
+
+            col_klasse1, col_klasse2 = st.columns([1, 2])
+
+            with col_klasse1:
+                # OIB-Effizienzklasse mit Farbe
+                klasse = kennzahlen.oib_effizienzklasse
+                color_map = {
+                    'A++': '#00b050', 'A+': '#92d050', 'A': '#c6e0b4',
+                    'B': '#ffff00', 'C': '#ffc000',
+                    'D': '#ff9900', 'E': '#ff6600',
+                    'F': '#ff0000', 'G': '#c00000', 'k.A.': '#808080'
+                }
+                color = color_map.get(klasse, '#808080')
+
+                st.markdown(f"""
+                <div style='background-color: {color}; padding: 30px; border-radius: 15px; text-align: center;'>
+                    <h1 style='margin: 0; color: white; font-size: 48px;'>{klasse}</h1>
+                    <p style='margin: 0; color: white; font-size: 14px;'>OIB RL6 Klasse</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col_klasse2:
+                st.markdown("**Klassifizierung nach OIB RL6 Tabelle 8:**")
+                peb_str = f"{kennzahlen.peb_kwh_m2a:.1f}" if kennzahlen.peb_kwh_m2a is not None else 'k.A.'
+                co2_str = f"{kennzahlen.co2_kg_m2a:.1f}" if kennzahlen.co2_kg_m2a is not None else 'k.A.'
+                f_gee_str = f"{kennzahlen.f_gee:.2f}" if kennzahlen.f_gee is not None else 'k.A.'
+
+                st.markdown(f"""
+                - **Primär:** HWB = {kennzahlen.hwb_kwh_m2a:.1f} kWh/m²a
+                - **PEB:** {peb_str} kWh/m²a
+                - **CO₂:** {co2_str} kg/m²a
+                - **f<sub>GEE</sub>:** {f_gee_str}
+
+                ℹ️ *Bei fehlenden Werten (PEB, CO₂, f<sub>GEE</sub>) erfolgt Klassifizierung ausschließlich nach HWB.*
+                """, unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            # KENNZAHLEN NACH OIB RL6 ABSCHNITT 11
+            st.markdown("#### 📊 Energiekennzahlen (OIB RL6 § 11)")
+
+            col1, col2, col3, col4, col5 = st.columns(5)
+
+            with col1:
+                st.metric(
+                    "HWB",
+                    f"{kennzahlen.hwb_kwh_m2a:.1f}",
+                    help="Heizwärmebedarf [kWh/m²a] - Wärmemenge für normierte Raumtemperatur (OIB RL6 § 11)"
+                )
+                st.caption("kWh/m²a")
+
+            with col2:
+                heb_val = f"{kennzahlen.heb_kwh_m2a:.1f}" if kennzahlen.heb_kwh_m2a is not None else "k.A."
+                st.metric(
+                    "HEB",
+                    heb_val,
+                    help="Heizenergiebedarf [kWh/m²a] - HWB + Verluste der gebäudetechnischen Systeme (OIB RL6 § 11)"
+                )
+                st.caption("kWh/m²a")
+
+            with col3:
+                wwwb_val = f"{kennzahlen.wwwb_kwh_m2a:.1f}" if kennzahlen.wwwb_kwh_m2a is not None else "k.A."
+                st.metric(
+                    "WWWB",
+                    wwwb_val,
+                    help="Warmwasserwärmebedarf [kWh/m²a] - Warmwasserbereitung (OIB RL6 § 11)"
+                )
+                st.caption("kWh/m²a")
+
+            with col4:
+                st.metric(
+                    "EEB",
+                    f"{kennzahlen.eeb_kwh_m2a:.1f}",
+                    help="Endenergiebedarf [kWh/m²a] - HEB + Warmwasser - Erträge (OIB RL6 § 11)"
+                )
+                st.caption("kWh/m²a")
+
+            with col5:
+                peb_val = f"{kennzahlen.peb_kwh_m2a:.1f}" if kennzahlen.peb_kwh_m2a is not None else "k.A."
+                st.metric(
+                    "PEB",
+                    peb_val,
+                    help="Primärenergiebedarf [kWh/m²a] - EEB mit Primärenergiefaktoren (OIB RL6 § 11)"
+                )
+                st.caption("kWh/m²a")
+
             st.markdown("")
-            import plotly.express as px
-            fig = px.bar(
-                monthly_df,
-                x='Monat',
-                y=['Heizung_kWh', 'Kuehlung_kWh', 'Beleuchtung_kWh', 'Geraete_kWh'],
-                title='Monatlicher Energieverbrauch',
-                labels={'value': 'Energie (kWh)', 'variable': 'Kategorie'},
-                barmode='stack',
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            col6, col7, col8 = st.columns(3)
 
-            # CSV Download
-            csv = monthly_df.to_csv(index=False)
-            st.download_button(
-                label="📅 Monatsdaten als CSV herunterladen",
-                data=csv,
-                file_name="monthly_summary.csv",
-                mime="text/csv",
-            )
+            with col6:
+                f_gee_val = f"{kennzahlen.f_gee:.2f}" if kennzahlen.f_gee is not None else "k.A."
+                st.metric(
+                    "f_GEE",
+                    f_gee_val,
+                    help="Gesamtenergieeffizienz-Faktor [-] - Dimensionsloses Verhältnis (OIB RL6 § 11). Anforderung 2020: ≤ 0,85"
+                )
+                st.caption("[-]")
 
-        # Vergleich mit Standards
-        st.markdown("---")
-        st.markdown("### 📐 Vergleich mit Energiestandards")
+            with col7:
+                co2_val = f"{kennzahlen.co2_kg_m2a:.1f}" if kennzahlen.co2_kg_m2a is not None else "k.A."
+                st.metric(
+                    "CO₂-Emissionen",
+                    co2_val,
+                    help="CO₂-Emissionen [kg/m²a] - Treibhausgasemissionen"
+                )
+                st.caption("kg/m²a")
 
-        st.markdown("""
-        #### Energieeffizienzklassen (vereinfacht nach EnEV)
+            with col8:
+                # Kühlbedarf (nicht in OIB RL6 § 11, aber relevant)
+                st.metric(
+                    "Kühlbedarf",
+                    f"{kennzahlen.kuehlkennzahl_kwh_m2a:.1f}",
+                    help="Kühlenergiebedarf [kWh/m²a] - Aus EnergyPlus-Simulation"
+                )
+                st.caption("kWh/m²a")
 
-        | Klasse | Energiekennzahl | Bewertung |
-        |--------|----------------|-----------|
-        | A+ | < 30 kWh/m²a | Exzellent (z.B. Passivhaus) |
-        | A | 30-50 kWh/m²a | Sehr gut (KfW 40) |
-        | B | 50-75 kWh/m²a | Gut (KfW 55) |
-        | C | 75-100 kWh/m²a | Befriedigend (EnEV-Standard) |
-        | D | 100-130 kWh/m²a | Ausreichend |
-        | E | 130-160 kWh/m²a | Mangelhaft |
-        | F | 160-200 kWh/m²a | Schlecht |
-        | G | 200-250 kWh/m²a | Sehr schlecht |
-        | H | > 250 kWh/m²a | Unsaniert |
-        """)
+            st.markdown("---")
 
-        st.success(f"**Ihr Gebäude:** {kennzahlen.energiekennzahl_kwh_m2a:.1f} kWh/m²a = Klasse **{kennzahlen.effizienzklasse}**")
+            # GEBÄUDEKENNDATEN NACH OIB RL6 § 12.2
+            st.markdown("#### 🏗️ Gebäudekenndaten (OIB RL6 § 12.2 Pflichtangaben)")
 
-        # Austrian Energieausweis metrics
-        st.markdown("---")
-        st.markdown("### 🇦🇹 Energieausweis-Kennzahlen (Österreich)")
+            col_geo1, col_geo2, col_geo3 = st.columns(3)
 
-        # Energiebedarfe
-        st.markdown("#### Energiebedarfe")
-        col1, col2, col3, col4 = st.columns(4)
+            with col_geo1:
+                st.markdown("**Geometrische Kennwerte**")
+                if kennzahlen.kompaktheit_av:
+                    st.metric("Kompaktheit A/V", f"{kennzahlen.kompaktheit_av:.3f} m⁻¹",
+                             help="A/V = Gebäude-Hüllfläche / Brutto-Volumen")
+                else:
+                    st.metric("Kompaktheit A/V", "k.A.", help="Nicht verfügbar")
 
-        with col1:
-            st.metric("HWB", f"{kennzahlen.hwb_kwh_m2a:.1f} kWh/m²a", help="Heizwärmebedarf")
+                if kennzahlen.char_laenge_lc:
+                    st.metric("Charakteristische Länge ℓc", f"{kennzahlen.char_laenge_lc:.2f} m",
+                             help="ℓc = V / A - Maß für Kompaktheit")
+                else:
+                    st.metric("Charakteristische Länge ℓc", "k.A.", help="Nicht verfügbar")
 
-        with col2:
-            wwwb_val = kennzahlen.wwwb_kwh_m2a if kennzahlen.wwwb_kwh_m2a is not None else "k.A."
-            st.metric("WWWB", f"{wwwb_val}", help="Warmwasserwärmebedarf (nicht verfügbar)")
+                if kennzahlen.mittlerer_u_wert:
+                    st.metric("Mittlerer U-Wert Ū", f"{kennzahlen.mittlerer_u_wert:.3f} W/m²K",
+                             help="Flächengewichteter U-Wert der Gebäudehülle")
+                else:
+                    st.metric("Mittlerer U-Wert Ū", "k.A.", help="Nicht verfügbar")
 
-        with col3:
-            st.metric("EEB", f"{kennzahlen.eeb_kwh_m2a:.1f} kWh/m²a", help="Endenergiebedarf")
+            with col_geo2:
+                st.markdown("**Wärmebilanz**")
+                st.metric("QT - Transmissionsverluste", f"{kennzahlen.transmissionswaermeverluste_kwh:.0f} kWh/a",
+                         help="Wärmeverluste durch die Gebäudehülle")
+                st.metric("QV - Lüftungsverluste", f"{kennzahlen.lueftungswaermeverluste_kwh:.0f} kWh/a",
+                         help="Wärmeverluste durch Infiltration und Lüftung")
+                st.metric("Solare Gewinne", f"{kennzahlen.solare_waermegewinne_kwh:.0f} kWh/a",
+                         help="Wärmegewinne durch Sonneneinstrahlung")
 
-        with col4:
-            peb_val = kennzahlen.peb_kwh_m2a if kennzahlen.peb_kwh_m2a is not None else "k.A."
-            st.metric("PEB", f"{peb_val}", help="Primärenergiebedarf (nicht verfügbar)")
+            with col_geo3:
+                st.markdown("**Auslegungslasten**")
+                st.metric("Heizlast", f"{kennzahlen.heizlast_w_m2:.1f} W/m²",
+                         help="Spezifische Heizlast für Dimensionierung")
+                st.metric("Kühllast", f"{kennzahlen.kuhllast_w_m2:.1f} W/m²",
+                         help="Spezifische Kühllast für Dimensionierung")
+                st.metric("Innere Wärmegewinne", f"{kennzahlen.innere_waermegewinne_kwh:.0f} kWh/a",
+                         help="Wärmegewinne durch Beleuchtung, Geräte, Personen")
 
-        col5, col6 = st.columns(2)
+            st.markdown("---")
 
-        with col5:
-            heb_val = kennzahlen.heb_kwh_m2a if kennzahlen.heb_kwh_m2a is not None else "k.A."
-            st.metric("HEB", f"{heb_val}", help="Haushaltsenergiebedarf (nicht verfügbar)")
+            # NIEDRIGSTENERGIEGEBÄUDE-ANFORDERUNGEN (§ 13)
+            st.markdown("#### 🎯 Niedrigstenergiegebäude-Anforderungen (Ab 2020)")
 
-        with col6:
-            co2_val = f"{kennzahlen.co2_kg_m2a:.1f} kg/m²a" if kennzahlen.co2_kg_m2a is not None else "k.A."
-            st.metric("CO₂", f"{co2_val}", help="CO₂-Emissionen (nicht verfügbar)")
+            if kennzahlen.char_laenge_lc:
+                lc = kennzahlen.char_laenge_lc
+                hwb_grenzwert = 14 * (1 + 3.0 / lc)
+                f_gee_grenzwert = 0.85
 
-        # Wärmeverluste und -gewinne
-        st.markdown("")
-        st.markdown("#### Wärmebilanz")
+                col_nzeb1, col_nzeb2 = st.columns(2)
 
-        col_verluste, col_gewinne = st.columns(2)
+                with col_nzeb1:
+                    hwb_erfuellt = kennzahlen.hwb_kwh_m2a <= hwb_grenzwert
+                    status_hwb = "✅" if hwb_erfuellt else "❌"
+                    st.markdown(f"""
+                    **HWB<sub>Ref,RK</sub>-Anforderung:**
+                    - Grenzwert: **{hwb_grenzwert:.1f} kWh/m²a** (14 × (1 + 3/ℓ<sub>c</sub>))
+                    - Ist-Wert: **{kennzahlen.hwb_kwh_m2a:.1f} kWh/m²a**
+                    - Status: {status_hwb} {"**Erfüllt**" if hwb_erfuellt else "**Nicht erfüllt**"}
+                    """, unsafe_allow_html=True)
 
-        with col_verluste:
-            st.markdown("**Wärmeverluste**")
-            st.metric("QT - Transmissionswärmeverluste", f"{kennzahlen.transmissionswaermeverluste_kwh:.0f} kWh/a",
-                     help="Wärmeverluste durch die Gebäudehülle")
-            st.metric("QV - Lüftungswärmeverluste", f"{kennzahlen.lueftungswaermeverluste_kwh:.0f} kWh/a",
-                     help="Wärmeverluste durch Infiltration und Lüftung")
+                with col_nzeb2:
+                    if kennzahlen.f_gee:
+                        f_gee_erfuellt = kennzahlen.f_gee <= f_gee_grenzwert
+                        status_gee = "✅" if f_gee_erfuellt else "❌"
+                        st.markdown(f"""
+                        **f<sub>GEE</sub>-Anforderung:**
+                        - Grenzwert: **≤ {f_gee_grenzwert:.2f}**
+                        - Ist-Wert: **{kennzahlen.f_gee:.2f}**
+                        - Status: {status_gee} {"**Erfüllt**" if f_gee_erfuellt else "**Nicht erfüllt**"}
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown("""
+                        **f<sub>GEE</sub>-Anforderung:**
+                        - Grenzwert: **≤ 0,85**
+                        - Ist-Wert: **k.A.**
+                        - Status: ℹ️ Nicht berechenbar (Primärenergiefaktoren fehlen)
+                        """, unsafe_allow_html=True)
+            else:
+                st.info("ℹ️ Niedrigstenergiegebäude-Prüfung nicht möglich - charakteristische Länge ℓc nicht verfügbar.")
 
-        with col_gewinne:
-            st.markdown("**Wärmegewinne**")
-            st.metric("Solare Wärmegewinne", f"{kennzahlen.solare_waermegewinne_kwh:.0f} kWh/a",
-                     help="Wärmegewinne durch Sonneneinstrahlung über Fenster")
-            st.metric("Innere Wärmegewinne", f"{kennzahlen.innere_waermegewinne_kwh:.0f} kWh/a",
-                     help="Wärmegewinne durch Beleuchtung, Geräte und Personen")
+            st.info("""
+            **Hinweis:** Kennzahlen mit "k.A." (keine Angabe) sind in der aktuellen Simulation nicht verfügbar,
+            da dafür zusätzliche Systemkomponenten (z.B. Warmwasserbereitung) oder Konfigurationen
+            (z.B. Primärenergiefaktoren, Emissionsfaktoren) erforderlich wären.
 
-        # Lasten
-        st.markdown("")
-        st.markdown("#### Auslegungslasten")
-
-        col_heizlast, col_kuhllast = st.columns(2)
-
-        with col_heizlast:
-            st.metric("Heizlast", f"{kennzahlen.heizlast_w_m2:.1f} W/m²",
-                     help="Spezifische Heizlast für Dimensionierung der Heizung")
-
-        with col_kuhllast:
-            st.metric("Kühllast", f"{kennzahlen.kuhllast_w_m2:.1f} W/m²",
-                     help="Spezifische Kühllast für Dimensionierung der Kühlung")
-
-        st.info("""
-        **Hinweis:** Kennzahlen mit "k.A." (keine Angabe) sind in der aktuellen Simulation nicht verfügbar,
-        da dafür zusätzliche Systemkomponenten (z.B. Warmwasserbereitung) oder Konfigurationen
-        (z.B. Primärenergiefaktoren, Emissionsfaktoren) erforderlich wären.
-        """)
-
-        # Tipps
-        with st.expander("💡 Tipps zur Verbesserung der Energieeffizienz"):
-            st.markdown("""
-            ### Maßnahmen zur Energieeinsparung:
-
-            **Gebäudehülle:**
-            - Dämmung verbessern (Wand, Dach, Boden)
-            - Fenster mit besserer Verglasung (U-Wert)
-            - Wärmebrücken minimieren
-
-            **Fenster:**
-            - Optimaler Fensterflächenanteil: 20-40%
-            - Südorientierung bevorzugen
-            - Verschattung im Sommer berücksichtigen
-
-            **HVAC-System:**
-            - Effiziente Wärmepumpe statt Gasheizung
-            - Wärmerückgewinnung in der Lüftung
-            - Nachtabsenkung der Heizung
-
-            **Nutzung:**
-            - Solltemperaturen optimieren (20°C Heizen, 26°C Kühlen)
-            - Innere Lasten reduzieren
-            - Natürliche Lüftung nutzen
+            Die **Energieeffizienzklasse** wird bei fehlenden Werten (PEB, CO₂, f_GEE) ausschließlich
+            nach **HWB** (Heizwärmebedarf) gemäß OIB RL6 Tabelle 8 bestimmt.
             """)
+
+        # ===== SUB-TAB 3: TABULAR REPORTS =====
+        with subtab3:
+            st.markdown("### 📈 Tabular Reports - Erweiterte Auswertung")
+            st.caption("Vorgefertigte EnergyPlus Summary Reports (aus SQL-Datenbank)")
+
+            if not has_tabular_reports or erweiterte_kennzahlen is None:
+                st.warning("""
+                ⚠️ **Tabular Reports nicht verfügbar**
+
+                Die erweiterten Tabular Reports konnten nicht geladen werden.
+                Dies kann passieren wenn:
+                - Die SQL-Datenbank nicht vollständig ist
+                - Die EnergyPlus Output:Table:SummaryReports nicht konfiguriert wurden
+                """)
+            else:
+                # Zeige Übersicht
+                st.info("""
+                **Was sind Tabular Reports?**
+
+                EnergyPlus erstellt automatisch vorgefertigte Summary Reports in der SQL-Datenbank.
+                Diese Reports enthalten bereits aggregierte Metriken ohne dass Zeitreihen manuell
+                summiert werden müssen - ideal für schnelle Analysen!
+                """)
+
+                end_uses = erweiterte_kennzahlen.end_uses
+                site_source = erweiterte_kennzahlen.site_source_energy
+                hvac_sizing = erweiterte_kennzahlen.hvac_sizing
+                envelope = erweiterte_kennzahlen.envelope
+
+                # ===== END USE BREAKDOWN =====
+                if end_uses:
+                    st.markdown("---")
+                    st.markdown("#### 🔌 End Use Breakdown (Verbrauchsaufteilung)")
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        st.metric("Heizung", f"{end_uses.heating_kwh:.0f} kWh",
+                                 help="Heizenergiebedarf aus Tabular Reports")
+                        st.caption(f"{end_uses.heating_kwh / total_floor_area:.1f} kWh/m²")
+
+                    with col2:
+                        st.metric("Kühlung", f"{end_uses.cooling_kwh:.0f} kWh",
+                                 help="Kühlenergiebedarf aus Tabular Reports")
+                        st.caption(f"{end_uses.cooling_kwh / total_floor_area:.1f} kWh/m²")
+
+                    with col3:
+                        st.metric("Beleuchtung", f"{end_uses.interior_lighting_kwh:.0f} kWh",
+                                 help="Beleuchtungsenergie aus Tabular Reports")
+                        st.caption(f"{end_uses.interior_lighting_kwh / total_floor_area:.1f} kWh/m²")
+
+                    with col4:
+                        st.metric("Geräte", f"{end_uses.interior_equipment_kwh:.0f} kWh",
+                                 help="Geräteenergie aus Tabular Reports")
+                        st.caption(f"{end_uses.interior_equipment_kwh / total_floor_area:.1f} kWh/m²")
+
+                    # Weitere Kategorien (falls vorhanden)
+                    if end_uses.fans_kwh > 0 or end_uses.pumps_kwh > 0:
+                        st.markdown("")
+                        col5, col6, col7 = st.columns(3)
+
+                        with col5:
+                            if end_uses.fans_kwh > 0:
+                                st.metric("Ventilatoren", f"{end_uses.fans_kwh:.0f} kWh")
+                                st.caption(f"{end_uses.fans_kwh / total_floor_area:.1f} kWh/m²")
+
+                        with col6:
+                            if end_uses.pumps_kwh > 0:
+                                st.metric("Pumpen", f"{end_uses.pumps_kwh:.0f} kWh")
+                                st.caption(f"{end_uses.pumps_kwh / total_floor_area:.1f} kWh/m²")
+
+                        with col7:
+                            other = end_uses.other_kwh
+                            if other > 0:
+                                st.metric("Sonstiges", f"{other:.0f} kWh")
+                                st.caption(f"{other / total_floor_area:.1f} kWh/m²")
+
+                    # End Use Chart
+                    st.markdown("")
+                    end_use_chart = viz.erstelle_detailliertes_end_use_chart(end_uses)
+                    st.plotly_chart(end_use_chart, use_container_width=True)
+
+                    # Energieträger-Aufschlüsselung
+                    st.markdown("")
+                    col_e1, col_e2, col_e3 = st.columns(3)
+
+                    with col_e1:
+                        st.metric("Strom gesamt", f"{end_uses.electricity_kwh:.0f} kWh",
+                                 help="Gesamter Stromverbrauch")
+                        st.caption(f"{end_uses.electricity_kwh / total_floor_area:.1f} kWh/m²")
+
+                    with col_e2:
+                        st.metric("Gas gesamt", f"{end_uses.natural_gas_kwh:.0f} kWh",
+                                 help="Gesamter Gasverbrauch")
+                        st.caption(f"{end_uses.natural_gas_kwh / total_floor_area:.1f} kWh/m²")
+
+                    with col_e3:
+                        st.metric("Gesamt", f"{end_uses.total_kwh:.0f} kWh",
+                                 help="Gesamtenergieverbrauch (alle Quellen)")
+                        st.caption(f"{end_uses.total_kwh / total_floor_area:.1f} kWh/m²")
+
+                # ===== SITE VS SOURCE ENERGY =====
+                if site_source:
+                    st.markdown("---")
+                    st.markdown("#### ⚡ Site vs. Source Energy (Primärenergie)")
+
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.markdown("**Site Energy (Endenergie)**")
+                        st.metric("Gesamt", f"{site_source.total_site_energy_kwh:.0f} kWh/a")
+                        st.metric("Spezifisch", f"{site_source.site_energy_per_m2_kwh:.1f} kWh/m²a")
+
+                    with col2:
+                        st.markdown("**Source Energy (Primärenergie)**")
+                        st.metric("Gesamt", f"{site_source.total_source_energy_kwh:.0f} kWh/a")
+                        st.metric("Spezifisch", f"{site_source.source_energy_per_m2_mj / 3.6:.1f} kWh/m²a")
+
+                    st.markdown("")
+                    site_source_chart = viz.erstelle_site_source_energy_chart(site_source)
+                    st.plotly_chart(site_source_chart, use_container_width=True)
+
+                    st.info("""
+                    **Site Energy** = Endenergie am Gebäude (was aus dem Netz kommt)
+                    **Source Energy** = Primärenergie (inkl. Verluste bei Erzeugung & Transport)
+
+                    Der Primärenergiefaktor berücksichtigt den Energieaufwand für
+                    die Bereitstellung der Energie.
+                    """)
+
+                # ===== HVAC DESIGN LOADS =====
+                if hvac_sizing:
+                    st.markdown("---")
+                    st.markdown("#### ❄️ HVAC Design Loads (Auslegungslasten)")
+
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.markdown("**Heizung**")
+                        st.metric("Heizlast", f"{hvac_sizing.heating_design_load_kw:.1f} kW")
+                        st.metric("Spezifisch", f"{hvac_sizing.heating_design_load_per_area_w_m2:.1f} W/m²")
+                        st.caption(f"Auslegungstag: {hvac_sizing.heating_design_day}")
+
+                    with col2:
+                        st.markdown("**Kühlung**")
+                        st.metric("Kühllast", f"{hvac_sizing.cooling_design_load_kw:.1f} kW")
+                        st.metric("Spezifisch", f"{hvac_sizing.cooling_design_load_per_area_w_m2:.1f} W/m²")
+                        st.caption(f"Auslegungstag: {hvac_sizing.cooling_design_day}")
+
+                    st.markdown("")
+                    hvac_chart = viz.erstelle_hvac_design_loads_chart(hvac_sizing, total_floor_area)
+                    st.plotly_chart(hvac_chart, use_container_width=True)
+
+                    st.info("""
+                    **Design Loads** = Auslegungslasten für die HVAC-Dimensionierung
+
+                    Diese Werte zeigen die maximal benötigte Heiz-/Kühlleistung an den
+                    extremsten Wetter-Tagen (Design Days) und dienen zur Auslegung der
+                    HVAC-Anlagen.
+                    """)
+
+                # ===== ENVELOPE PERFORMANCE =====
+                if envelope:
+                    st.markdown("---")
+                    st.markdown("#### 🏗️ Envelope Performance (Gebäudehülle)")
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.metric("Wandfläche", f"{envelope.gross_wall_area_m2:.1f} m²")
+                        if envelope.wall_u_value:
+                            st.caption(f"U-Wert: {envelope.wall_u_value:.3f} W/m²K")
+
+                    with col2:
+                        st.metric("Fensterfläche", f"{envelope.gross_window_area_m2:.1f} m²")
+                        if envelope.window_u_value:
+                            st.caption(f"U-Wert: {envelope.window_u_value:.3f} W/m²K")
+
+                    with col3:
+                        st.metric("Dachfläche", f"{envelope.gross_roof_area_m2:.1f} m²")
+                        if envelope.roof_u_value:
+                            st.caption(f"U-Wert: {envelope.roof_u_value:.3f} W/m²K")
+
+                    st.markdown("")
+                    if envelope.window_wall_ratio > 0:
+                        st.metric("Window-Wall-Ratio (WWR)",
+                                 f"{envelope.window_wall_ratio:.1%}",
+                                 help="Verhältnis Fensterfläche zu Gesamtfläche (Fenster + Wand)")
+
+                # ===== ERWEITERTE ÜBERSICHT =====
+                st.markdown("---")
+                st.markdown("#### 📊 Erweiterte Dashboard-Ansicht")
+
+                if st.button("🚀 Erweiterte Übersicht anzeigen", key="show_extended_dashboard"):
+                    with st.spinner("Erstelle erweitertes Dashboard..."):
+                        extended_dashboard = viz.erstelle_erweiterte_uebersicht(
+                            erweiterte_kennzahlen,
+                            result.sql_file
+                        )
+                    st.plotly_chart(extended_dashboard, use_container_width=True)
+
+        # ===== SUB-TAB 4: STANDARDS & TIPPS =====
+        with subtab4:
+            st.markdown("### 📐 Vergleich mit Energiestandards")
+
+            st.markdown("""
+            #### Energieeffizienzklassen (vereinfacht nach EnEV)
+
+            | Klasse | Energiekennzahl | Bewertung |
+            |--------|----------------|-----------|
+            | A+ | < 30 kWh/m²a | Exzellent (z.B. Passivhaus) |
+            | A | 30-50 kWh/m²a | Sehr gut (KfW 40) |
+            | B | 50-75 kWh/m²a | Gut (KfW 55) |
+            | C | 75-100 kWh/m²a | Befriedigend (EnEV-Standard) |
+            | D | 100-130 kWh/m²a | Ausreichend |
+            | E | 130-160 kWh/m²a | Mangelhaft |
+            | F | 160-200 kWh/m²a | Schlecht |
+            | G | 200-250 kWh/m²a | Sehr schlecht |
+            | H | > 250 kWh/m²a | Unsaniert |
+            """)
+
+            st.success(f"**Ihr Gebäude:** {kennzahlen.energiekennzahl_kwh_m2a:.1f} kWh/m²a = Klasse **{kennzahlen.effizienzklasse}**")
+
+            # Tipps
+            st.markdown("---")
+            st.markdown("### 💡 Tipps zur Verbesserung der Energieeffizienz")
+
+            col_tip1, col_tip2 = st.columns(2)
+
+            with col_tip1:
+                st.markdown("""
+                **🏗️ Gebäudehülle:**
+                - Dämmung verbessern (Wand, Dach, Boden)
+                - Fenster mit besserer Verglasung (niedrigerer U-Wert)
+                - Wärmebrücken minimieren
+
+                **🪟 Fenster:**
+                - Optimaler Fensterflächenanteil: 20-40%
+                - Südorientierung bevorzugen
+                - Verschattung im Sommer berücksichtigen
+                """)
+
+            with col_tip2:
+                st.markdown("""
+                **❄️ HVAC-System:**
+                - Effiziente Wärmepumpe statt Gasheizung
+                - Wärmerückgewinnung in der Lüftung
+                - Nachtabsenkung der Heizung
+
+                **👤 Nutzung:**
+                - Solltemperaturen optimieren (20°C Heizen, 26°C Kühlen)
+                - Innere Lasten reduzieren
+                - Natürliche Lüftung nutzen
+                """)
 
     # =============================================================================
     # TAB 3: BEHAGLICHKEIT
@@ -710,9 +1121,11 @@ try:
         building_model = st.session_state.get('building_model')
         if building_model:
             geom_summary = get_attr_safe(building_model, 'geometry_summary', {})
-            if get_source(building_model) == "energieausweis":
+            source = get_source(building_model)
+            if source in ["energieausweis", "oib_energieausweis"]:
+                model_type = "OIB RL6 12.2" if source == "oib_energieausweis" else "Energieausweis"
                 st.markdown(f"""
-                **Source:** 5-Zone Model (Energieausweis)
+                **Source:** 5-Zone Model ({model_type})
                 **Building Type:** {get_attr_safe(building_model, 'gebaeudetyp', 'N/A')}
                 **Zones:** {get_attr_safe(building_model, 'num_zones', 'N/A')}
                 **Floor Area:** {geom_summary.get('total_floor_area', 0):.1f} m²
@@ -741,7 +1154,7 @@ try:
             st.warning("No geometry data available")
 
         # Section 2: Envelope (if available from Energieausweis)
-        if building_model and get_source(building_model) == "energieausweis":
+        if building_model and get_source(building_model) in ["energieausweis", "oib_energieausweis"]:
             ea_data = get_attr_safe(building_model, 'energieausweis_data')
             if ea_data:
                 st.markdown("---")

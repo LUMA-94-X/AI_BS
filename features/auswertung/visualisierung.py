@@ -8,7 +8,8 @@ from typing import Optional, List
 import pandas as pd
 
 from features.auswertung.sql_parser import EnergyPlusSQLParser
-from features.auswertung.kpi_rechner import GebaeudeKennzahlen
+from features.auswertung.kpi_rechner import GebaeudeKennzahlen, ErweiterteKennzahlen
+from features.auswertung.tabular_reports import EndUseSummary, HVACSizing, SiteSourceEnergy
 
 
 class ErgebnisVisualisierer:
@@ -492,5 +493,340 @@ class ErgebnisVisualisierer:
         fig.update_yaxes(title_text="Energie [kWh]", row=2, col=1)
         fig.update_xaxes(title_text="", row=2, col=2)
         fig.update_yaxes(title_text="Temperatur [°C]", row=2, col=2)
+
+        return fig
+
+    def erstelle_detailliertes_end_use_chart(
+        self,
+        end_uses: EndUseSummary,
+        titel: str = "Detaillierte Verbrauchsaufteilung (Tabular Reports)"
+    ) -> go.Figure:
+        """Erstelle detailliertes End-Use Pie Chart aus Tabular Reports.
+
+        Zeigt eine umfassendere Aufschlüsselung als die Standard-Energiebilanz,
+        inkl. Fans, Pumps, und andere Kategorien direkt aus EnergyPlus Reports.
+
+        Args:
+            end_uses: EndUseSummary aus TabularReportParser
+            titel: Titel des Diagramms
+
+        Returns:
+            Plotly Figure
+        """
+        labels = []
+        values = []
+        colors = []
+
+        # Mapping für Farben
+        color_map = {
+            'Heizung': '#FF6B6B',
+            'Kühlung': '#4ECDC4',
+            'Beleuchtung': '#FFE66D',
+            'Geräte': '#95E1D3',
+            'Ventilatoren': '#A8E6CF',
+            'Pumpen': '#C7CEEA',
+            'Sonstiges': '#B0B0B0'
+        }
+
+        # Nur nicht-null Werte hinzufügen
+        if end_uses.heating_kwh > 0:
+            labels.append('Heizung')
+            values.append(end_uses.heating_kwh)
+            colors.append(color_map['Heizung'])
+
+        if end_uses.cooling_kwh > 0:
+            labels.append('Kühlung')
+            values.append(end_uses.cooling_kwh)
+            colors.append(color_map['Kühlung'])
+
+        if end_uses.interior_lighting_kwh > 0:
+            labels.append('Beleuchtung')
+            values.append(end_uses.interior_lighting_kwh)
+            colors.append(color_map['Beleuchtung'])
+
+        if end_uses.interior_equipment_kwh > 0:
+            labels.append('Geräte')
+            values.append(end_uses.interior_equipment_kwh)
+            colors.append(color_map['Geräte'])
+
+        if end_uses.fans_kwh > 0:
+            labels.append('Ventilatoren')
+            values.append(end_uses.fans_kwh)
+            colors.append(color_map['Ventilatoren'])
+
+        if end_uses.pumps_kwh > 0:
+            labels.append('Pumpen')
+            values.append(end_uses.pumps_kwh)
+            colors.append(color_map['Pumpen'])
+
+        # Sonstiges berechnen
+        other = end_uses.other_kwh
+        if other > 0:
+            labels.append('Sonstiges')
+            values.append(other)
+            colors.append(color_map['Sonstiges'])
+
+        fig = go.Figure(data=[go.Pie(
+            labels=labels,
+            values=values,
+            marker=dict(colors=colors),
+            textinfo='label+percent',
+            textposition='inside',
+            hovertemplate='<b>%{label}</b><br>%{value:.0f} kWh<br>%{percent}<extra></extra>'
+        )])
+
+        fig.update_layout(
+            title=dict(
+                text=f"{titel}<br><sub>Gesamt: {end_uses.total_kwh:.0f} kWh | "
+                     f"Strom: {end_uses.electricity_kwh:.0f} kWh | "
+                     f"Gas: {end_uses.natural_gas_kwh:.0f} kWh</sub>",
+                x=0.5,
+                xanchor='center'
+            ),
+            showlegend=True,
+            height=500,
+        )
+
+        return fig
+
+    def erstelle_hvac_design_loads_chart(
+        self,
+        hvac_sizing: HVACSizing,
+        nettoflaeche_m2: float,
+        titel: str = "HVAC Auslegungslasten"
+    ) -> go.Figure:
+        """Erstelle Balkendiagramm der HVAC Design-Lasten.
+
+        Args:
+            hvac_sizing: HVACSizing aus TabularReportParser
+            nettoflaeche_m2: Nettofläche für spezifische Werte
+            titel: Titel des Diagramms
+
+        Returns:
+            Plotly Figure
+        """
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=("Absolute Lasten [kW]", "Spezifische Lasten [W/m²]"),
+            horizontal_spacing=0.15
+        )
+
+        # Absolute Lasten
+        fig.add_trace(
+            go.Bar(
+                x=['Heizlast', 'Kühllast'],
+                y=[hvac_sizing.heating_design_load_kw, hvac_sizing.cooling_design_load_kw],
+                marker=dict(color=['#FF6B6B', '#4ECDC4']),
+                text=[f'{hvac_sizing.heating_design_load_kw:.1f} kW',
+                      f'{hvac_sizing.cooling_design_load_kw:.1f} kW'],
+                textposition='outside',
+                showlegend=False
+            ),
+            row=1, col=1
+        )
+
+        # Spezifische Lasten
+        fig.add_trace(
+            go.Bar(
+                x=['Heizlast', 'Kühllast'],
+                y=[hvac_sizing.heating_design_load_per_area_w_m2,
+                   hvac_sizing.cooling_design_load_per_area_w_m2],
+                marker=dict(color=['#FF6B6B', '#4ECDC4']),
+                text=[f'{hvac_sizing.heating_design_load_per_area_w_m2:.1f} W/m²',
+                      f'{hvac_sizing.cooling_design_load_per_area_w_m2:.1f} W/m²'],
+                textposition='outside',
+                showlegend=False
+            ),
+            row=1, col=2
+        )
+
+        fig.update_layout(
+            title=dict(
+                text=f"{titel}<br><sub>Heiz-Auslegungstag: {hvac_sizing.heating_design_day} | "
+                     f"Kühl-Auslegungstag: {hvac_sizing.cooling_design_day}</sub>",
+                x=0.5,
+                xanchor='center'
+            ),
+            height=400,
+            showlegend=False
+        )
+
+        fig.update_yaxes(title_text="Last [kW]", row=1, col=1)
+        fig.update_yaxes(title_text="Last [W/m²]", row=1, col=2)
+
+        return fig
+
+    def erstelle_site_source_energy_chart(
+        self,
+        site_source: SiteSourceEnergy,
+        titel: str = "Site vs. Source Energy (Primärenergie)"
+    ) -> go.Figure:
+        """Erstelle Vergleichschart für Site und Source Energy.
+
+        Args:
+            site_source: SiteSourceEnergy aus TabularReportParser
+            titel: Titel des Diagramms
+
+        Returns:
+            Plotly Figure
+        """
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=("Gesamtenergie [kWh/a]", "Spezifisch [kWh/m²a]"),
+            horizontal_spacing=0.15
+        )
+
+        # Absolute Werte
+        fig.add_trace(
+            go.Bar(
+                x=['Site Energy', 'Source Energy'],
+                y=[site_source.total_site_energy_kwh, site_source.total_source_energy_kwh],
+                marker=dict(color=['#95E1D3', '#FF6B6B']),
+                text=[f'{site_source.total_site_energy_kwh:.0f} kWh',
+                      f'{site_source.total_source_energy_kwh:.0f} kWh'],
+                textposition='outside',
+                showlegend=False
+            ),
+            row=1, col=1
+        )
+
+        # Spezifische Werte
+        fig.add_trace(
+            go.Bar(
+                x=['Site Energy', 'Source Energy'],
+                y=[site_source.site_energy_per_m2_kwh,
+                   site_source.total_source_energy_kwh / (site_source.site_energy_per_m2_kwh / site_source.site_energy_per_m2_kwh) if site_source.site_energy_per_m2_kwh > 0 else 0],
+                marker=dict(color=['#95E1D3', '#FF6B6B']),
+                text=[f'{site_source.site_energy_per_m2_kwh:.1f} kWh/m²a',
+                      f'{site_source.source_energy_per_m2_mj / 3.6:.1f} kWh/m²a'],
+                textposition='outside',
+                showlegend=False
+            ),
+            row=1, col=2
+        )
+
+        fig.update_layout(
+            title=titel,
+            height=400,
+            showlegend=False
+        )
+
+        fig.update_yaxes(title_text="Energie [kWh/a]", row=1, col=1)
+        fig.update_yaxes(title_text="Energie [kWh/m²a]", row=1, col=2)
+
+        return fig
+
+    def erstelle_erweiterte_uebersicht(
+        self,
+        erweiterte_kennzahlen: ErweiterteKennzahlen,
+        sql_file: Path | str
+    ) -> go.Figure:
+        """Erstelle erweiterte Übersicht mit Tabular Reports.
+
+        Args:
+            erweiterte_kennzahlen: ErweiterteKennzahlen mit Tabular Data
+            sql_file: Path zur SQL-Datei
+
+        Returns:
+            Plotly Figure mit erweitertem Dashboard
+        """
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                'Detaillierte Verbrauchsaufteilung',
+                'HVAC Design-Lasten',
+                'Site vs. Source Energy',
+                'Monatliche Energiebilanz'
+            ),
+            specs=[
+                [{'type': 'pie'}, {'type': 'bar'}],
+                [{'type': 'bar'}, {'type': 'bar'}]
+            ],
+            vertical_spacing=0.15,
+            horizontal_spacing=0.12,
+        )
+
+        kennzahlen = erweiterte_kennzahlen.basis_kennzahlen
+        end_uses = erweiterte_kennzahlen.end_uses
+        hvac_sizing = erweiterte_kennzahlen.hvac_sizing
+        site_source = erweiterte_kennzahlen.site_source_energy
+
+        # 1. Detaillierte End Uses (Pie)
+        if end_uses:
+            labels = ['Heizung', 'Kühlung', 'Beleuchtung', 'Geräte']
+            values = [end_uses.heating_kwh, end_uses.cooling_kwh,
+                     end_uses.interior_lighting_kwh, end_uses.interior_equipment_kwh]
+            colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3']
+
+            if end_uses.fans_kwh > 0:
+                labels.append('Ventilatoren')
+                values.append(end_uses.fans_kwh)
+                colors.append('#A8E6CF')
+
+            if end_uses.pumps_kwh > 0:
+                labels.append('Pumpen')
+                values.append(end_uses.pumps_kwh)
+                colors.append('#C7CEEA')
+
+            fig.add_trace(
+                go.Pie(labels=labels, values=values, marker=dict(colors=colors), showlegend=False),
+                row=1, col=1
+            )
+
+        # 2. HVAC Design Loads
+        if hvac_sizing:
+            fig.add_trace(
+                go.Bar(
+                    x=['Heizlast', 'Kühllast'],
+                    y=[hvac_sizing.heating_design_load_kw, hvac_sizing.cooling_design_load_kw],
+                    marker=dict(color=['#FF6B6B', '#4ECDC4']),
+                    text=[f'{hvac_sizing.heating_design_load_kw:.1f} kW',
+                          f'{hvac_sizing.cooling_design_load_kw:.1f} kW'],
+                    textposition='outside',
+                    showlegend=False
+                ),
+                row=1, col=2
+            )
+
+        # 3. Site vs Source Energy
+        if site_source:
+            fig.add_trace(
+                go.Bar(
+                    x=['Site Energy', 'Source Energy'],
+                    y=[site_source.total_site_energy_kwh, site_source.total_source_energy_kwh],
+                    marker=dict(color=['#95E1D3', '#FF6B6B']),
+                    text=[f'{site_source.total_site_energy_kwh:.0f} kWh',
+                          f'{site_source.total_source_energy_kwh:.0f} kWh'],
+                    textposition='outside',
+                    showlegend=False
+                ),
+                row=2, col=1
+            )
+
+        # 4. Monatsuebersicht
+        with EnergyPlusSQLParser(sql_file) as parser:
+            df_monat = parser.get_monthly_summary()
+
+        if not df_monat.empty:
+            fig.add_trace(
+                go.Bar(name='Heizung', x=df_monat['Monat'], y=df_monat['Heizung_kWh'],
+                      marker_color='#FF6B6B', showlegend=False),
+                row=2, col=2
+            )
+            fig.add_trace(
+                go.Bar(name='Kühlung', x=df_monat['Monat'], y=df_monat['Kuehlung_kWh'],
+                      marker_color='#4ECDC4', showlegend=False),
+                row=2, col=2
+            )
+
+        fig.update_layout(
+            title_text=f"Erweiterte Simulation (Tabular Reports) - Effizienzklasse {kennzahlen.effizienzklasse}",
+            height=800,
+            showlegend=False,
+        )
+
+        fig.update_yaxes(title_text="Last [kW]", row=1, col=2)
+        fig.update_yaxes(title_text="Energie [kWh]", row=2, col=1)
+        fig.update_yaxes(title_text="Energie [kWh]", row=2, col=2)
 
         return fig
