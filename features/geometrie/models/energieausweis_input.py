@@ -20,6 +20,31 @@ class Bauweise(str, Enum):
     LEICHT = "Leicht"  # Leichtbau (Holz, Fertighaus)
 
 
+class LueftungsArt(str, Enum):
+    """Art der Lüftung nach OIB RL6."""
+
+    FENSTER = "Fensterlüftung"
+    ABLUFT = "Mechanische Abluft"
+    ZUABLUFT_OHNE_WRG = "Zu-/Abluft ohne WRG"
+    ZUABLUFT_MIT_WRG = "Zu-/Abluft mit WRG"
+
+
+class KlimaQuelle(str, Enum):
+    """Quelle für Klimadaten."""
+
+    MANUELL = "Manuell"  # Nutzer gibt Werte direkt ein
+    DATENBANK = "Datenbank"  # Aus österreichischer Klimadatenbank (PLZ)
+    EPW = "EPW"  # Aus EPW-Wetterdatei berechnet
+
+
+class GeometrieModus(str, Enum):
+    """Modus für Geometrie-Erstellung."""
+
+    AUTOMATISCH = "Automatisch"  # System berechnet L/W/H aus OIB-Daten
+    MANUELL = "Manuell"  # Nutzer gibt L/W/H selbst ein
+    HYBRID = "Hybrid"  # Nutzer gibt L an, System berechnet W/H
+
+
 class FensterData(BaseModel):
     """Fensterflächenangaben aus Energieausweis."""
 
@@ -107,6 +132,16 @@ class EnergieausweisInput(BaseModel):
         description="U-Wert Fenster [W/m²K]"
     )
 
+    # ============ OIB RL6 12.2 PFLICHTANGABEN ============
+
+    # --- Flächen & Volumen ---
+    bezugsflaeche_m2: Optional[float] = Field(
+        default=None,
+        gt=10,
+        lt=50000,
+        description="Bezugs-Grundfläche / Nettofläche (ohne Wände) [m²]"
+    )
+
     # ============ ENERGIEAUSWEIS KENNWERTE (optional) ============
     brutto_volumen_m3: Optional[float] = Field(
         default=None,
@@ -136,9 +171,87 @@ class EnergieausweisInput(BaseModel):
         description="Mittlerer U-Wert (flächengewichtet) [W/m²K] - wird berechnet wenn nicht angegeben"
     )
 
+    # --- Hüllfläche gesamt (wird berechnet oder direkt eingegeben) ---
+    huellflaeche_gesamt_m2: Optional[float] = Field(
+        default=None,
+        gt=50,
+        lt=100000,
+        description="Gebäude-Hüllfläche gesamt [m²] (Wand + Dach + Boden)"
+    )
+
     bauweise: Bauweise = Field(
         default=Bauweise.MASSIV,
         description="Bauweise des Gebäudes"
+    )
+
+    # ============ OIB RL6 12.2 KLIMADATEN ============
+
+    # --- Klimaregion & Temperaturen ---
+    klimaregion: Optional[str] = Field(
+        default=None,
+        description="Klimaregion nach ÖNORM B 8110-5 (z.B. 'Ost', 'West', 'Süd', 'Nord')"
+    )
+
+    heizgradtage_kd: Optional[float] = Field(
+        default=None,
+        gt=0,
+        lt=10000,
+        description="Heizgradtage [Kd] für 20°C Heizgrenze"
+    )
+
+    heiztage: Optional[int] = Field(
+        default=None,
+        gt=0,
+        lt=366,
+        description="Anzahl Heiztage [-]"
+    )
+
+    norm_aussentemperatur_c: Optional[float] = Field(
+        default=None,
+        gt=-30,
+        lt=10,
+        description="Norm-Außentemperatur für Heizlastberechnung [°C]"
+    )
+
+    klima_quelle: KlimaQuelle = Field(
+        default=KlimaQuelle.MANUELL,
+        description="Quelle für Klimadaten (Manuell/Datenbank/EPW)"
+    )
+
+    plz: Optional[int] = Field(
+        default=None,
+        gt=1000,
+        lt=9999,
+        description="Postleitzahl (für Datenbank-basierte Klimadaten)"
+    )
+
+    # ============ OIB RL6 12.2 TECHNISCHE SYSTEME ============
+
+    # --- Lüftung ---
+    art_der_lueftung: Optional[LueftungsArt] = Field(
+        default=None,
+        description="Art der Lüftung nach OIB RL6"
+    )
+
+    soll_innentemperatur_c: float = Field(
+        default=20.0,
+        ge=15,
+        le=26,
+        description="Soll-Innentemperatur Heizperiode [°C]"
+    )
+
+    # --- Optional ---
+    co2_emissionen_kg_m2a: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="CO₂-Emissionen [kg/m²a]"
+    )
+
+    # ============ GEOMETRIE-MODUS (für 2-Phasen-Eingabe) ============
+
+    geometrie_modus: GeometrieModus = Field(
+        default=GeometrieModus.AUTOMATISCH,
+        description="Modus für Geometrie-Erstellung"
     )
 
     # ============ GEOMETRIE (optional für Rückrechnung) ============
@@ -291,6 +404,90 @@ class EnergieausweisInput(BaseModel):
 
         return self
 
+    @model_validator(mode='after')
+    def validate_oib_consistency(self):
+        """
+        Prüfe Konsistenz der OIB 12.2-Angaben.
+
+        Gibt Warnungen aus, aber wirft keine Fehler (User-Eingaben haben Priorität).
+        """
+        warnings = []
+
+        # Check 1: Hüllfläche-Konsistenz (falls einzelne Flächen UND Gesamt gegeben)
+        if (self.wandflaeche_m2 is not None and
+            self.dachflaeche_m2 is not None and
+            self.bodenflaeche_m2 is not None and
+            self.huellflaeche_gesamt_m2 is not None):
+
+            huellflaeche_berechnet = (
+                self.wandflaeche_m2 +
+                self.dachflaeche_m2 +
+                self.bodenflaeche_m2
+            )
+
+            diff_prozent = abs(huellflaeche_berechnet - self.huellflaeche_gesamt_m2) / self.huellflaeche_gesamt_m2 * 100
+
+            if diff_prozent > 5:  # Mehr als 5% Abweichung
+                warnings.append(
+                    f"Hüllfläche-Inkonsistenz: Summe (Wand+Dach+Boden) = {huellflaeche_berechnet:.1f}m², "
+                    f"aber Gesamt-Hüllfläche = {self.huellflaeche_gesamt_m2:.1f}m² "
+                    f"(Abweichung: {diff_prozent:.1f}%)"
+                )
+
+        # Check 2: A/V-Verhältnis (Kompaktheit)
+        if (self.huellflaeche_gesamt_m2 is not None and
+            self.brutto_volumen_m3 is not None and
+            self.kompaktheit is not None):
+
+            av_berechnet = self.huellflaeche_gesamt_m2 / self.brutto_volumen_m3
+            diff_prozent = abs(av_berechnet - self.kompaktheit) / self.kompaktheit * 100
+
+            if diff_prozent > 5:
+                warnings.append(
+                    f"Kompaktheit-Inkonsistenz: A/V berechnet = {av_berechnet:.3f} m⁻¹, "
+                    f"aber angegeben = {self.kompaktheit:.3f} m⁻¹ "
+                    f"(Abweichung: {diff_prozent:.1f}%)"
+                )
+
+        # Check 3: Charakteristische Länge
+        if (self.brutto_volumen_m3 is not None and
+            self.huellflaeche_gesamt_m2 is not None and
+            self.charakteristische_laenge_m is not None):
+
+            lc_berechnet = self.brutto_volumen_m3 / self.huellflaeche_gesamt_m2
+            diff_prozent = abs(lc_berechnet - self.charakteristische_laenge_m) / self.charakteristische_laenge_m * 100
+
+            if diff_prozent > 5:
+                warnings.append(
+                    f"Charakteristische Länge-Inkonsistenz: ℓc berechnet = {lc_berechnet:.2f}m, "
+                    f"aber angegeben = {self.charakteristische_laenge_m:.2f}m "
+                    f"(Abweichung: {diff_prozent:.1f}%)"
+                )
+
+        # Check 4: Bezugs- vs. Brutto-Grundfläche (typisch: BGF ≈ 1.05-1.15 × NF)
+        if self.bezugsflaeche_m2 is not None:
+            bgf_nf_ratio = self.bruttoflaeche_m2 / self.bezugsflaeche_m2
+
+            if bgf_nf_ratio < 1.0:
+                warnings.append(
+                    f"Brutto-Grundfläche ({self.bruttoflaeche_m2:.1f}m²) kleiner als "
+                    f"Bezugs-Grundfläche ({self.bezugsflaeche_m2:.1f}m²). "
+                    f"Üblicherweise: BGF > NF wegen Wänden."
+                )
+            elif bgf_nf_ratio > 1.25:
+                warnings.append(
+                    f"Brutto-Grundfläche ({self.bruttoflaeche_m2:.1f}m²) sehr viel größer als "
+                    f"Bezugs-Grundfläche ({self.bezugsflaeche_m2:.1f}m²). "
+                    f"Faktor: {bgf_nf_ratio:.2f} (typisch: 1.05-1.15)"
+                )
+
+        # Warnungen als Attribut speichern (können in UI angezeigt werden)
+        if warnings:
+            # Speichere Warnungen als private Attribute (Pydantic erlaubt das)
+            object.__setattr__(self, '_oib_warnings', warnings)
+
+        return self
+
     @property
     def has_complete_envelope_data(self) -> bool:
         """Prüft ob vollständige Hüllflächen-Daten vorhanden sind."""
@@ -299,6 +496,33 @@ class EnergieausweisInput(BaseModel):
             self.dachflaeche_m2 is not None,
             self.bodenflaeche_m2 is not None
         ])
+
+    @property
+    def has_complete_oib_data(self) -> bool:
+        """Prüft ob alle OIB 12.2-Pflichtangaben vorhanden sind."""
+        required_fields = [
+            self.bruttoflaeche_m2 is not None,
+            self.bezugsflaeche_m2 is not None,
+            self.brutto_volumen_m3 is not None,
+            self.huellflaeche_gesamt_m2 is not None,
+            self.kompaktheit is not None,
+            self.charakteristische_laenge_m is not None,
+            # U-Werte sind bereits Pflicht (...)
+            # Klimadaten
+            self.klimaregion is not None,
+            self.heizgradtage_kd is not None,
+            self.heiztage is not None,
+            self.norm_aussentemperatur_c is not None,
+            # Systeme
+            self.art_der_lueftung is not None,
+            # Bauweise ist bereits mit Default versehen
+        ]
+        return all(required_fields)
+
+    @property
+    def oib_warnings(self) -> list[str]:
+        """Gibt Liste der OIB-Konsistenz-Warnungen zurück."""
+        return getattr(self, '_oib_warnings', [])
 
     @property
     def effective_infiltration(self) -> float:

@@ -136,16 +136,10 @@ class HVACTemplateManager:
         if not zones:
             raise ValueError("No zones found in IDF. Cannot add HVAC system.")
 
-        # Adjust setpoints if heating/cooling is disabled
-        # Set extreme values so system never operates
-        if not heating_enabled:
-            heating_setpoint = -99.0
-            print(f"   ⚠️  Heating disabled - setting extreme heating setpoint: {heating_setpoint}°C")
-        if not cooling_enabled:
-            cooling_setpoint = 99.0
-            print(f"   ⚠️  Cooling disabled - setting extreme cooling setpoint: {cooling_setpoint}°C")
-
+        # Report HVAC configuration
         print(f"\n🔧 Applying HVAC template '{template_name}' to {len(zones)} zones...")
+        print(f"   {'✅' if heating_enabled else '❌'} Heating: {'ENABLED' if heating_enabled else 'DISABLED'} (Setpoint: {heating_setpoint}°C)")
+        print(f"   {'✅' if cooling_enabled else '❌'} Cooling: {'ENABLED' if cooling_enabled else 'DISABLED'} (Setpoint: {cooling_setpoint}°C)")
 
         # IMPORTANT: Remove any existing manual thermostats first!
         # When using HVACTEMPLATE, ExpandObjects will generate thermostats automatically.
@@ -155,16 +149,16 @@ class HVACTemplateManager:
         # Add global objects required for IdealLoads HVAC
         self._ensure_global_objects(idf)
 
-        # Add schedules if not present
-        self._ensure_schedules(idf, heating_setpoint, cooling_setpoint)
+        # Add schedules if not present (including availability schedules for on/off control)
+        self._ensure_schedules(idf, heating_setpoint, cooling_setpoint, heating_enabled, cooling_enabled)
 
         # Add shared thermostat ONCE for all zones
         self._add_shared_thermostat(idf, heating_setpoint, cooling_setpoint)
 
-        # Add HVAC for each zone
+        # Add HVAC for each zone (with availability schedule references)
         for zone in zones:
             zone_name = zone.Name
-            self._add_ideal_loads_to_zone(idf, zone_name)
+            self._add_ideal_loads_to_zone(idf, zone_name, heating_enabled, cooling_enabled)
 
         print(f"✅ HVAC system applied to all zones")
 
@@ -261,7 +255,9 @@ class HVACTemplateManager:
         self,
         idf: IDF,
         heating_setpoint: float = 20.0,
-        cooling_setpoint: float = 26.0
+        cooling_setpoint: float = 26.0,
+        heating_enabled: bool = True,
+        cooling_enabled: bool = True
     ) -> None:
         """Ensure required schedules exist in IDF.
 
@@ -272,12 +268,15 @@ class HVACTemplateManager:
             idf: IDF object
             heating_setpoint: Heating setpoint temperature in °C
             cooling_setpoint: Cooling setpoint temperature in °C
+            heating_enabled: Whether heating is enabled
+            cooling_enabled: Whether cooling is enabled
         """
         # First ensure ScheduleTypeLimits exist
         self._ensure_schedule_type_limits(idf)
 
         # Remove existing schedules that we need to recreate with correct values
-        for sch_name in ["AlwaysOn", "HeatingSetpoint", "CoolingSetpoint"]:
+        for sch_name in ["AlwaysOn", "AlwaysOff", "HeatingSetpoint", "CoolingSetpoint",
+                        "HeatingAvailability", "CoolingAvailability"]:
             existing = [
                 sch for sch in idf.idfobjects.get('SCHEDULE:CONSTANT', [])
                 if sch.Name == sch_name
@@ -296,6 +295,14 @@ class HVACTemplateManager:
             Hourly_Value=4.0,  # 4 = DualSetpoint control type
         )
 
+        # Create AlwaysOff schedule (value = 0)
+        idf.newidfobject(
+            "SCHEDULE:CONSTANT",
+            Name="AlwaysOff",
+            Schedule_Type_Limits_Name="Control Type",
+            Hourly_Value=0.0,  # 0 = Off
+        )
+
         # Create Heating setpoint schedule (user-defined temperature)
         idf.newidfobject(
             "SCHEDULE:CONSTANT",
@@ -310,6 +317,24 @@ class HVACTemplateManager:
             Name="CoolingSetpoint",
             Schedule_Type_Limits_Name="Temperature",  # Temperature range
             Hourly_Value=cooling_setpoint,  # User-defined cooling setpoint
+        )
+
+        # Create Heating Availability Schedule (0 = Off, 1 = On)
+        # This is the proper way to enable/disable heating in EnergyPlus
+        idf.newidfobject(
+            "SCHEDULE:CONSTANT",
+            Name="HeatingAvailability",
+            Schedule_Type_Limits_Name="Control Type",
+            Hourly_Value=1.0 if heating_enabled else 0.0,
+        )
+
+        # Create Cooling Availability Schedule (0 = Off, 1 = On)
+        # This is the proper way to enable/disable cooling in EnergyPlus
+        idf.newidfobject(
+            "SCHEDULE:CONSTANT",
+            Name="CoolingAvailability",
+            Schedule_Type_Limits_Name="Control Type",
+            Hourly_Value=1.0 if cooling_enabled else 0.0,
         )
 
         # NOTE: ThermostatSetpoint:DualSetpoint is NOT created manually anymore!
@@ -426,18 +451,25 @@ class HVACTemplateManager:
             )
             print(f"   ✅ Created shared thermostat directly (Heating: {heating_setpoint}°C, Cooling: {cooling_setpoint}°C)")
 
-    def _add_ideal_loads_to_zone(self, idf: IDF, zone_name: str) -> None:
+    def _add_ideal_loads_to_zone(self, idf: IDF, zone_name: str,
+                                 heating_enabled: bool = True,
+                                 cooling_enabled: bool = True) -> None:
         """
         Add ideal loads air system to a specific zone using HVACTEMPLATE.
 
         ✅ FIXED: Now uses HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM instead of direct ZONEHVAC
         This avoids eppy field order bugs that caused simulation crashes.
 
+        ✅ FIXED: Now uses Availability Schedules for proper heating/cooling control
+        This is the correct way to disable heating or cooling in EnergyPlus.
+
         See: SIMULATION_CRASH_ANALYSIS.md
 
         Args:
             idf: IDF object
             zone_name: Name of the zone
+            heating_enabled: Whether heating is enabled
+            cooling_enabled: Whether cooling is enabled
         """
         # Check if HVAC already exists for this zone - REMOVE old ones first
         existing_hvac_template = [
@@ -460,34 +492,28 @@ class HVACTemplateManager:
             for obj in existing_hvac_direct:
                 idf.removeidfobject(obj)
 
-        # Load and apply template
-        template_path = self.templates_dir / "ideal_loads.idf"
-
-        if not template_path.exists():
-            # Fallback: Create HVACTEMPLATE objects directly
-            print(f"   ⚠️  Template not found, creating HVACTEMPLATE objects directly")
-            self._add_hvactemplate_direct(idf, zone_name)
-            return
-
-        # Load template with zone name
-        template_content = self._load_template_with_zone(template_path, zone_name)
-
-        # Merge HVACTEMPLATE objects (only ZONE, not THERMOSTAT - that's loaded globally)
-        self._merge_template_objects(
-            idf,
-            template_content,
-            ["HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM"]
-        )
+        # Always create HVACTEMPLATE objects directly (more reliable than template files)
+        # This ensures availability schedules are properly set
+        self._add_hvactemplate_direct(idf, zone_name, heating_enabled, cooling_enabled)
 
         print(f"   ✅ Added ideal loads HVAC to zone '{zone_name}' (via HVACTEMPLATE)")
 
-    def _add_hvactemplate_direct(self, idf: IDF, zone_name: str) -> None:
+    def _add_hvactemplate_direct(self, idf: IDF, zone_name: str,
+                                 heating_enabled: bool = True,
+                                 cooling_enabled: bool = True) -> None:
         """
-        Fallback: Create HVACTEMPLATE objects directly if template file not found.
+        Create HVACTEMPLATE objects directly with proper availability schedules.
+
+        This is the correct way to enable/disable heating and cooling in EnergyPlus.
+        Availability schedules control whether the system is available to operate:
+        - Schedule value 0 = System OFF (no operation)
+        - Schedule value 1 = System ON (available to operate if needed)
 
         Args:
             idf: IDF object
             zone_name: Name of the zone
+            heating_enabled: Whether heating is enabled
+            cooling_enabled: Whether cooling is enabled
         """
         # HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM (reference shared thermostat)
         idf.newidfobject(
@@ -505,8 +531,9 @@ class HVACTemplateManager:
             Cooling_Limit="NoLimit",
             Maximum_Cooling_Air_Flow_Rate="",
             Maximum_Total_Cooling_Capacity="",
-            Heating_Availability_Schedule_Name="",
-            Cooling_Availability_Schedule_Name="",
+            # ✅ CRITICAL FIX: Use availability schedules for on/off control
+            Heating_Availability_Schedule_Name="HeatingAvailability" if heating_enabled else "AlwaysOff",
+            Cooling_Availability_Schedule_Name="CoolingAvailability" if cooling_enabled else "AlwaysOff",
             Dehumidification_Control_Type="ConstantSupplyHumidityRatio",
             Cooling_Sensible_Heat_Ratio="",
             Humidification_Control_Type="ConstantSupplyHumidityRatio",
@@ -590,7 +617,9 @@ def create_building_with_hvac(
     geometry_idf: IDF,
     hvac_template: str = "ideal_loads",
     heating_setpoint: float = 20.0,
-    cooling_setpoint: float = 26.0
+    cooling_setpoint: float = 26.0,
+    heating_enabled: bool = True,
+    cooling_enabled: bool = True
 ) -> IDF:
     """Convenience function to add HVAC to a geometry IDF.
 
@@ -599,6 +628,8 @@ def create_building_with_hvac(
         hvac_template: Name of HVAC template to apply
         heating_setpoint: Heating setpoint temperature in °C (default: 20.0)
         cooling_setpoint: Cooling setpoint temperature in °C (default: 26.0)
+        heating_enabled: Whether heating is enabled (default: True)
+        cooling_enabled: Whether cooling is enabled (default: True)
 
     Returns:
         IDF with HVAC system added
@@ -608,5 +639,7 @@ def create_building_with_hvac(
         geometry_idf,
         hvac_template,
         heating_setpoint=heating_setpoint,
-        cooling_setpoint=cooling_setpoint
+        cooling_setpoint=cooling_setpoint,
+        heating_enabled=heating_enabled,
+        cooling_enabled=cooling_enabled
     )

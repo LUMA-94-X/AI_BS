@@ -12,10 +12,20 @@ from features.geometrie.box_generator import BuildingGeometry
 from features.geometrie.models.energieausweis_input import (
     EnergieausweisInput,
     FensterData,
-    GebaeudeTyp
+    GebaeudeTyp,
+    LueftungsArt,
+    KlimaQuelle,
+    GeometrieModus,
+    Bauweise
 )
 from features.geometrie.generators.five_zone_generator import FiveZoneGenerator
-from features.geometrie.utils.geometry_solver import GeometrySolver
+from features.geometrie.utils.geometry_solver import GeometrySolver, DirectOIBSolver
+from core.climate_data import (
+    ClimateData,
+    get_climate_data_by_plz,
+    get_climate_data_by_city,
+    get_available_cities
+)
 from features.geometrie.utils.perimeter_calculator import PerimeterCalculator
 from features.geometrie.utils.fenster_distribution import FensterDistribution
 from core.building_model import BuildingModel, save_building_model_to_session
@@ -197,11 +207,20 @@ with tab1:
 
 
 # ============================================================================
-# TAB 2: ENERGIEAUSWEIS (5-Zone-Modell)
+# TAB 2: ENERGIEAUSWEIS (5-Zone-Modell mit OIB RL6 12.2)
 # ============================================================================
 
 with tab2:
-    st.subheader("📋 Energieausweis-basierte Generierung")
+    st.subheader("📋 OIB RL6 12.2-konforme Eingabe")
+    st.info("""
+    **Vollständige Energieausweis-Daten direkt eingeben**
+    - System erstellt optimales 5-Zonen-Modell mit direkter Geometrie-Rekonstruktion
+    - Unterstützt OIB RL6 12.2 Pflichtangaben mit Echtzeit-Validierung
+    - Klimadaten aus Datenbank, EPW oder manueller Eingabe
+    """)
+
+    # ========== PHASE 1: OIB 12.2 EINGABE ==========
+    st.markdown("### Phase 1️⃣: OIB 12.2-Pflichtangaben")
 
     col1, col2, col3 = st.columns([1.2, 1.2, 1.6])
 
@@ -210,356 +229,668 @@ with tab2:
         st.markdown("#### 🏢 Gebäudedaten")
 
         gebaeudetyp = st.selectbox(
-            "Gebäudetyp",
+            "Gebäudetyp *",
             options=[typ.value for typ in GebaeudeTyp],
-            index=1,  # MFH default
+            index=0,  # EFH default
             help="Einfamilienhaus, Mehrfamilienhaus oder Nichtwohngebäude"
         )
 
         bruttoflaeche = st.number_input(
-            "Bruttogrundfläche (m²) *",
+            "Brutto-Grundfläche (m²) *",
             min_value=20.0,
             max_value=50000.0,
-            value=165.0,
+            value=219.0,
             step=10.0,
-            help="Brutto-Grundfläche inkl. Wände (Pflichtfeld)"
+            help="Brutto-Grundfläche inkl. Wände"
         )
 
-        st.markdown("#### 📐 Hüllflächen (optional)")
-        st.caption("Falls bekannt - verbessert die Geometrie-Rekonstruktion")
-
-        use_envelope_data = st.checkbox("Hüllflächen-Daten eingeben", value=False)
-
-        if use_envelope_data:
-            wandflaeche = st.number_input("Außenwandfläche (m²)", min_value=0.0, max_value=10000.0, value=240.0, step=10.0)
-            dachflaeche = st.number_input("Dachfläche (m²)", min_value=0.0, max_value=5000.0, value=80.0, step=5.0)
-            bodenflaeche = st.number_input("Bodenfläche (m²)", min_value=0.0, max_value=5000.0, value=80.0, step=5.0)
-        else:
-            wandflaeche = None
-            dachflaeche = None
-            bodenflaeche = None
-
-        st.markdown("#### 🏗️ Geschosse")
-        anzahl_geschosse = st.number_input("Anzahl Geschosse", min_value=1, max_value=20, value=2, step=1)
-        geschosshoehe = st.slider("Geschosshöhe (m)", min_value=2.3, max_value=4.5, value=3.0, step=0.1)
-
-        aspect_ratio = st.slider(
-            "Länge/Breite-Verhältnis (Hint)",
-            min_value=1.0,
-            max_value=3.0,
-            value=1.5,
-            step=0.1,
-            help="1.0=quadratisch, 3.0=langgestreckt"
+        bezugsflaeche = st.number_input(
+            "Bezugs-Grundfläche / Nettofläche (m²) *",
+            min_value=15.0,
+            max_value=45000.0,
+            value=175.0,
+            step=10.0,
+            help="Nettofläche ohne Wände (typisch 85-95% der Bruttofläche)"
         )
 
-    # ========== SPALTE 2: HÜLLFLÄCHEN ==========
-    with col2:
-        st.markdown("#### 🧱 Hüllflächen")
-
-        st.markdown("**U-Werte (W/m²K) ***")
-
-        u_wand = st.number_input("U-Wert Außenwand", min_value=0.1, max_value=3.0, value=0.35, step=0.05)
-        u_dach = st.number_input("U-Wert Dach", min_value=0.1, max_value=2.0, value=0.25, step=0.05)
-        u_boden = st.number_input("U-Wert Bodenplatte", min_value=0.1, max_value=2.0, value=0.40, step=0.05)
-        u_fenster = st.number_input("U-Wert Fenster", min_value=0.5, max_value=6.0, value=1.3, step=0.1)
-        g_wert = st.slider("g-Wert Fenster (SHGC)", min_value=0.1, max_value=0.9, value=0.6, step=0.05)
-
-        st.markdown("#### 🪟 Fenster")
-
-        fenster_mode = st.radio(
-            "Eingabeart",
-            options=["Gesamt-WWR", "Exakte Flächen pro Orientierung"],
-            index=0
+        brutto_volumen = st.number_input(
+            "Brutto-Volumen (m³) *",
+            min_value=50.0,
+            max_value=500000.0,
+            value=729.0,
+            step=10.0,
+            help="Brutto-Volumen inkl. Wände"
         )
 
-        if fenster_mode == "Gesamt-WWR":
-            wwr_gesamt = st.slider("Fensterflächenanteil (WWR)", min_value=0.05, max_value=0.95, value=0.30, step=0.05)
-            st.caption(f"{wwr_gesamt*100:.0f}% der Wandfläche")
-            fenster_data = FensterData(window_wall_ratio=wwr_gesamt)
+        huellflaeche_gesamt = st.number_input(
+            "Gebäude-Hüllfläche gesamt (m²) *",
+            min_value=50.0,
+            max_value=100000.0,
+            value=538.0,
+            step=10.0,
+            help="Summe aus Wand + Dach + Boden"
+        )
+
+        # Automatische Berechnung A/V und ℓc
+        if brutto_volumen > 0 and huellflaeche_gesamt > 0:
+            kompaktheit = huellflaeche_gesamt / brutto_volumen  # A/V
+            char_laenge = brutto_volumen / huellflaeche_gesamt  # V/A
+
+            st.info(f"""
+            **Automatisch berechnet:**
+            - Kompaktheit A/V: **{kompaktheit:.3f} m⁻¹**
+            - Charakteristische Länge ℓc: **{char_laenge:.3f} m**
+            """)
         else:
-            st.caption("Fensterflächen in m²:")
-            f_nord = st.number_input("Nord", min_value=0.0, max_value=500.0, value=10.0, step=1.0)
-            f_ost = st.number_input("Ost", min_value=0.0, max_value=500.0, value=15.0, step=1.0)
-            f_sued = st.number_input("Süd", min_value=0.0, max_value=500.0, value=25.0, step=1.0)
-            f_west = st.number_input("West", min_value=0.0, max_value=500.0, value=12.0, step=1.0)
-            fenster_data = FensterData(nord_m2=f_nord, ost_m2=f_ost, sued_m2=f_sued, west_m2=f_west)
-            st.caption(f"Gesamt: {f_nord + f_ost + f_sued + f_west:.1f} m²")
+            kompaktheit = 0.636
+            char_laenge = 1.573
+            st.warning("⚠️ Volumen und Hüllfläche müssen > 0 sein")
 
-        st.markdown("#### 💨 Lüftung")
-        luftwechsel = st.slider("Luftwechselrate (1/h)", min_value=0.0, max_value=3.0, value=0.5, step=0.1)
+        st.markdown("#### 🧱 U-Werte (W/m²K) *")
 
-        st.markdown("#### 📊 Energieausweis-Kennwerte")
-        st.caption("Optional - können automatisch berechnet werden")
-
-        use_kennwerte_input = st.checkbox("Kennwerte manuell eingeben", value=False, key="use_kennwerte")
-
-        if use_kennwerte_input:
-            brutto_volumen_input = st.number_input(
-                "Brutto-Volumen (m³)",
-                min_value=30.0,
-                max_value=500000.0,
-                value=500.0,
-                step=10.0,
-                help="Brutto-Volumen inkl. Wände"
-            )
-            kompaktheit_input = st.number_input(
-                "Kompaktheit A/V (m²/m³)",
-                min_value=0.1,
-                max_value=10.0,
-                value=1.0,
-                step=0.1,
-                help="Verhältnis Hüllfläche zu Volumen"
-            )
-            char_laenge_input = st.number_input(
-                "Charakteristische Länge (m)",
-                min_value=0.5,
-                max_value=50.0,
-                value=1.0,
-                step=0.1,
-                help="lc = V/A"
-            )
-            mittlerer_u_wert_input = st.number_input(
-                "Mittlerer U-Wert (W/m²K)",
-                min_value=0.1,
-                max_value=3.0,
-                value=0.5,
-                step=0.05,
-                help="Flächengewichteter mittlerer U-Wert"
-            )
-        else:
-            brutto_volumen_input = None
-            kompaktheit_input = None
-            char_laenge_input = None
-            mittlerer_u_wert_input = None
+        u_wand = st.number_input("Außenwand", min_value=0.1, max_value=3.0, value=0.35, step=0.05, key="u_wand_oib")
+        u_dach = st.number_input("Dach", min_value=0.1, max_value=2.0, value=0.25, step=0.05, key="u_dach_oib")
+        u_boden = st.number_input("Bodenplatte", min_value=0.1, max_value=2.0, value=0.45, step=0.05, key="u_boden_oib")
+        u_fenster = st.number_input("Fenster", min_value=0.5, max_value=6.0, value=1.5, step=0.1, key="u_fenster_oib")
 
         bauweise = st.selectbox(
-            "Bauweise",
-            options=["Massiv", "Leicht"],
+            "Bauweise *",
+            options=[b.value for b in Bauweise],
             index=0,
-            help="Bauweise des Gebäudes"
+            help="Massivbau oder Leichtbau"
         )
 
-    # ========== SPALTE 3: VORSCHAU & GENERIERUNG ==========
+    # ========== SPALTE 2: KLIMADATEN & SYSTEME ==========
+    with col2:
+        st.markdown("#### 🌡️ Klimadaten & Systeme")
+
+        # Klimadaten-Quelle
+        klima_quelle = st.radio(
+            "Klimadaten-Quelle *",
+            options=[q.value for q in KlimaQuelle],
+            index=0,
+            horizontal=True,
+            help="Wählen Sie, wie Klimadaten bereitgestellt werden"
+        )
+
+        # Initialisiere Klimadaten-Variablen
+        klimaregion = None
+        heizgradtage = None
+        heiztage = None
+        norm_aussentemp = None
+
+        if klima_quelle == KlimaQuelle.DATENBANK.value:
+            # PLZ-basierte Klimadaten
+            st.caption("📍 Österreichische Klimadatenbank (ÖNORM B 8110-5)")
+
+            plz_input = st.number_input(
+                "Postleitzahl",
+                min_value=1000,
+                max_value=9999,
+                value=1010,
+                step=1,
+                help="Österreichische PLZ für automatischen Klimadaten-Lookup"
+            )
+
+            climate_data = get_climate_data_by_plz(plz_input)
+
+            if climate_data:
+                klimaregion = climate_data.klimaregion
+                heizgradtage = climate_data.heizgradtage_kd
+                heiztage = climate_data.heiztage
+                norm_aussentemp = climate_data.norm_aussentemperatur_c
+
+                st.success(f"✅ Klimadaten für PLZ {plz_input} gefunden")
+                st.caption(f"Klimaregion: **{klimaregion}**")
+            else:
+                st.warning(f"⚠️ Keine Klimadaten für PLZ {plz_input} gefunden")
+                st.caption("Verfügbare Städte: " + ", ".join(get_available_cities()))
+
+        elif klima_quelle == KlimaQuelle.EPW.value:
+            # EPW-basierte Klimadaten
+            st.caption("📂 Klimadaten aus EPW-Wetterdatei berechnen")
+            st.info("🚧 EPW-Upload wird in dieser Version noch nicht unterstützt. Bitte verwenden Sie 'Manuell' oder 'Datenbank'.")
+
+            # Fallback auf manuelle Eingabe
+            klimaregion = "Ost"
+            heizgradtage = 3400.0
+            heiztage = 220
+            norm_aussentemp = -12.0
+
+        else:  # Manuell
+            # Manuelle Eingabe
+            st.caption("✏️ Manuelle Eingabe der Klimadaten")
+
+            klimaregion = st.selectbox(
+                "Klimaregion *",
+                options=["Ost", "West", "Süd", "Nord"],
+                index=0,
+                help="Klimaregion nach ÖNORM B 8110-5"
+            )
+
+            heizgradtage = st.number_input(
+                "Heizgradtage (Kd) *",
+                min_value=0.0,
+                max_value=10000.0,
+                value=3400.0,
+                step=50.0,
+                help="Heizgradtage für 20°C Heizgrenze"
+            )
+
+            heiztage = st.number_input(
+                "Heiztage *",
+                min_value=0,
+                max_value=365,
+                value=220,
+                step=5,
+                help="Anzahl Heiztage pro Jahr"
+            )
+
+            norm_aussentemp = st.number_input(
+                "Norm-Außentemperatur (°C) *",
+                min_value=-30.0,
+                max_value=10.0,
+                value=-12.0,
+                step=1.0,
+                help="Norm-Außentemperatur für Heizlastberechnung"
+            )
+
+        # Technische Systeme
+        st.markdown("**Technische Systeme**")
+
+        art_lueftung = st.selectbox(
+            "Art der Lüftung *",
+            options=[art.value for art in LueftungsArt],
+            index=0,
+            help="Art der Lüftung nach OIB RL6"
+        )
+
+        soll_innentemp = st.number_input(
+            "Soll-Innentemperatur (°C) *",
+            min_value=15.0,
+            max_value=26.0,
+            value=20.0,
+            step=0.5,
+            help="Soll-Innentemperatur Heizperiode"
+        )
+
+        # CO2-Emissionen entfernt - nicht Teil der OIB 12.2 Pflichtangaben
+        co2_emissionen = None
+
+    # ========== SPALTE 3: VALIDIERUNG & FENSTER ==========
     with col3:
-        st.markdown("#### 🔍 Geometrie-Rekonstruktion")
+        st.markdown("#### ✅ Echtzeit-Validierung")
 
+        # Erstelle temporäres EnergieausweisInput für Validierung
         try:
-            from features.geometrie.models.energieausweis_input import Bauweise
-
-            ea_input = EnergieausweisInput(
+            temp_ea_input = EnergieausweisInput(
                 bruttoflaeche_m2=bruttoflaeche,
-                wandflaeche_m2=wandflaeche,
-                dachflaeche_m2=dachflaeche,
-                bodenflaeche_m2=bodenflaeche,
-                anzahl_geschosse=anzahl_geschosse,
-                geschosshoehe_m=geschosshoehe,
+                bezugsflaeche_m2=bezugsflaeche,
+                brutto_volumen_m3=brutto_volumen,
+                huellflaeche_gesamt_m2=huellflaeche_gesamt,
+                kompaktheit=kompaktheit,
+                charakteristische_laenge_m=char_laenge,
                 u_wert_wand=u_wand,
                 u_wert_dach=u_dach,
                 u_wert_boden=u_boden,
                 u_wert_fenster=u_fenster,
-                g_wert_fenster=g_wert,
-                brutto_volumen_m3=brutto_volumen_input,
-                kompaktheit=kompaktheit_input,
-                charakteristische_laenge_m=char_laenge_input,
-                mittlerer_u_wert=mittlerer_u_wert_input,
                 bauweise=Bauweise(bauweise),
-                fenster=fenster_data,
-                luftwechselrate_h=luftwechsel,
+                klimaregion=klimaregion,
+                heizgradtage_kd=heizgradtage,
+                heiztage=heiztage,
+                norm_aussentemperatur_c=norm_aussentemp,
+                art_der_lueftung=LueftungsArt(art_lueftung) if art_lueftung else None,
+                soll_innentemperatur_c=soll_innentemp,
+                co2_emissionen_kg_m2a=co2_emissionen,
                 gebaeudetyp=GebaeudeTyp(gebaeudetyp),
-                aspect_ratio_hint=aspect_ratio
+                anzahl_geschosse=2,  # Wird in Phase 2 gesetzt
+                geschosshoehe_m=3.0,
+                fenster=FensterData(window_wall_ratio=0.3),
             )
 
-            if st.button("🔍 Geometrie berechnen", type="primary", key="calc_geometry"):
-                with st.spinner("Berechne Geometrie..."):
-                    solver = GeometrySolver()
-                    solution = solver.solve(ea_input)
+            # OIB-Warnungen anzeigen
+            oib_warnings = temp_ea_input.oib_warnings
 
-                    st.session_state['ea_input'] = ea_input
-                    st.session_state['geo_solution'] = solution
-
-            # Zeige Lösung falls vorhanden
-            if 'geo_solution' in st.session_state:
-                solution = st.session_state['geo_solution']
-
-                st.success(f"✅ Geometrie berechnet ({solution.method.value})")
-
-                col_a, col_b, col_c = st.columns(3)
-                with col_a:
-                    st.metric("Länge", f"{solution.length:.1f} m")
-                with col_b:
-                    st.metric("Breite", f"{solution.width:.1f} m")
-                with col_c:
-                    st.metric("Höhe", f"{solution.height:.1f} m")
-
-                col_d, col_e = st.columns(2)
-                with col_d:
-                    st.metric("Grundfläche", f"{solution.floor_area:.0f} m²")
-                with col_e:
-                    st.metric("Volumen", f"{solution.volume:.0f} m³")
-
-                confidence_color = "🟢" if solution.confidence > 0.8 else "🟡" if solution.confidence > 0.6 else "🔴"
-                st.info(f"{confidence_color} **Konfidenz:** {solution.confidence*100:.0f}%")
-
-                if solution.warnings:
-                    with st.expander("⚠️ Warnungen"):
-                        for warning in solution.warnings:
-                            st.warning(warning)
-
-                st.markdown("---")
-
-                # IDF-Generierung
-                st.markdown("#### 🏗️ 5-Zone-Modell erstellen")
-
-                if st.button("🚀 5-Zone-IDF erstellen", type="primary", key="create_5zone"):
-                    with st.spinner("Erstelle 5-Zone-Modell..."):
-                        try:
-                            generator = FiveZoneGenerator()
-                            output_dir = Path(__file__).parent.parent.parent.parent / "output" / "energieausweis"
-                            output_dir.mkdir(parents=True, exist_ok=True)
-                            output_path = output_dir / "gebaeude_5zone.idf"
-
-                            idf = generator.create_from_energieausweis(
-                                ea_data=ea_input,
-                                output_path=output_path
-                            )
-
-                            zones = idf.idfobjects["ZONE"]
-                            surfaces = idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-                            windows = idf.idfobjects["FENESTRATIONSURFACE:DETAILED"]
-
-                            st.success(f"✅ IDF erstellt: `{output_path.name}`")
-
-                            # Session State
-                            st.session_state['idf'] = idf
-                            st.session_state['idf_path'] = output_path
-                            st.session_state['geometry_source'] = 'energieausweis'
-                            st.session_state['geometry_method'] = 'energieausweis'
-                            st.session_state['geometry_valid'] = True
-
-                            # BuildingModel erstellen
-                            geo_solution = st.session_state.get('geo_solution')
-                            if geo_solution:
-                                building_model = BuildingModel.from_energieausweis(
-                                    geo_solution=geo_solution,
-                                    ea_data=ea_input,
-                                    idf_path=output_path,
-                                    num_zones=len(zones)
-                                )
-                                save_building_model_to_session(st.session_state, building_model)
-
-                                # Erstelle Zonen-Layout für ALLE Geschosse (für Visualisierung)
-                                perimeter_calc = PerimeterCalculator()
-                                wwr = ea_input.fenster.window_wall_ratio or 0.3
-
-                                # Berechne Fenster-Verteilung (für realistische Fassaden-Visualisierung)
-                                fenster_dist = FensterDistribution()
-
-                                # Wandflächen berechnen
-                                wall_areas = fenster_dist.estimate_wall_areas_from_geometry(
-                                    building_length=geo_solution.length,
-                                    building_width=geo_solution.width,
-                                    building_height=geo_solution.height
-                                )
-
-                                # WWR pro Orientierung berechnen
-                                orientation_wwr = fenster_dist.calculate_orientation_wwr(
-                                    fenster_data=ea_input.fenster,
-                                    wall_areas=wall_areas,
-                                    gebaeudetyp=ea_input.gebaeudetyp
-                                )
-
-                                # Fensterflächen berechnen (in m²)
-                                window_areas = fenster_dist.calculate_window_areas(
-                                    orientation_wwr=orientation_wwr,
-                                    wall_areas=wall_areas
-                                )
-
-                                # Multi-Floor Layouts erstellen
-                                all_floor_layouts = perimeter_calc.create_multi_floor_layout(
-                                    building_length=geo_solution.length,
-                                    building_width=geo_solution.width,
-                                    floor_height=geo_solution.floor_height,
-                                    num_floors=geo_solution.num_floors,
-                                    wwr=wwr
-                                )
-
-                                # Konvertiere alle Zonen aller Geschosse zu Dict
-                                all_zones_dict = []
-                                for floor_num, floor_layout in all_floor_layouts.items():
-                                    for zone_name, zone_geom in floor_layout.all_zones.items():
-                                        all_zones_dict.append({
-                                            'floor': floor_num,
-                                            'zone_name': zone_name,
-                                            'name': zone_geom.name,
-                                            'x_origin': zone_geom.x_origin,
-                                            'y_origin': zone_geom.y_origin,
-                                            'z_origin': zone_geom.z_origin,
-                                            'length': zone_geom.length,
-                                            'width': zone_geom.width,
-                                            'height': zone_geom.height,
-                                            'floor_area': zone_geom.floor_area,
-                                        })
-
-                                # Erstes Geschoss separat für 2D-Grundriss
-                                zone_layout_first_floor_dict = {}
-                                for zone_name, zone_geom in all_floor_layouts[0].all_zones.items():
-                                    zone_layout_first_floor_dict[zone_name] = {
-                                        'name': zone_geom.name,
-                                        'x_origin': zone_geom.x_origin,
-                                        'y_origin': zone_geom.y_origin,
-                                        'z_origin': zone_geom.z_origin,
-                                        'length': zone_geom.length,
-                                        'width': zone_geom.width,
-                                        'height': zone_geom.height,
-                                        'floor_area': zone_geom.floor_area,
-                                    }
-
-                                # Visualisierungs-Daten speichern
-                                st.session_state['visualization_data'] = {
-                                    'length': geo_solution.length,
-                                    'width': geo_solution.width,
-                                    'height': geo_solution.height,
-                                    'num_floors': geo_solution.num_floors,
-                                    'floor_area': geo_solution.floor_area,
-                                    'volume': geo_solution.volume,
-                                    'av_ratio': geo_solution.av_ratio,
-                                    'zone_layout': zone_layout_first_floor_dict,  # Erstes Geschoss für 2D-Grundriss
-                                    'all_zones': all_zones_dict,  # ALLE Zonen aller Geschosse für 3D
-                                    'window_wall_ratio': wwr,
-                                    # NEU: Fenster-Daten für realistische Fassaden-Visualisierung
-                                    'window_data': {
-                                        'wall_areas': wall_areas,  # {"north": 60.0, "east": 36.0, ...}
-                                        'orientation_wwr': {  # WWR pro Orientierung
-                                            'north': orientation_wwr.north,
-                                            'east': orientation_wwr.east,
-                                            'south': orientation_wwr.south,
-                                            'west': orientation_wwr.west,
-                                        },
-                                        'window_areas': window_areas,  # {"north": 12.0, "east": 8.0, ...} in m²
-                                    }
-                                }
-
-                            col_s1, col_s2, col_s3 = st.columns(3)
-                            with col_s1:
-                                st.metric("Zonen", len(zones))
-                            with col_s2:
-                                st.metric("Surfaces", len(surfaces))
-                            with col_s3:
-                                st.metric("Fenster", len(windows))
-
-                            st.info("✅ Wechseln Sie zu 'Vorschau' für die 3D-Ansicht oder zu **HVAC** für das nächste Setup.")
-
-                        except Exception as e:
-                            st.error(f"❌ Fehler: {e}")
-                            import traceback
-                            with st.expander("🐛 Details"):
-                                st.code(traceback.format_exc())
-
+            if oib_warnings:
+                st.warning(f"⚠️ {len(oib_warnings)} Konsistenz-Warnung(en)")
+                for warning in oib_warnings:
+                    st.caption(f"• {warning}")
             else:
-                st.info("👆 Klicken Sie auf 'Geometrie berechnen' um zu starten.")
+                st.success("✅ Alle OIB-Werte konsistent")
+
+            # Zusammenfassung
+            st.markdown("**Zusammenfassung:**")
+            summary_data = {
+                "BGF": f"{bruttoflaeche:.0f} m²",
+                "NF": f"{bezugsflaeche:.0f} m²",
+                "V": f"{brutto_volumen:.0f} m³",
+                "A": f"{huellflaeche_gesamt:.0f} m²",
+                "A/V": f"{kompaktheit:.3f} m⁻¹",
+                "ℓc": f"{char_laenge:.2f} m",
+                "Klima": klimaregion or "—",
+                "HGT": f"{heizgradtage:.0f} Kd" if heizgradtage else "—",
+            }
+
+            for key, val in summary_data.items():
+                st.caption(f"**{key}:** {val}")
 
         except Exception as e:
             st.error(f"❌ Validierungsfehler: {e}")
+
+        # Fenster-Eingabe
+        st.markdown("---")
+        st.markdown("#### 🪟 Fenster")
+
+        fenster_mode = st.radio(
+            "Eingabeart",
+            options=["Gesamt-WWR", "Exakte Flächen"],
+            index=0,
+            horizontal=True,
+            key="fenster_mode_oib"
+        )
+
+        if fenster_mode == "Gesamt-WWR":
+            wwr_gesamt = st.slider("Fensterflächenanteil (WWR)", min_value=0.05, max_value=0.95, value=0.30, step=0.05, key="wwr_oib")
+            st.caption(f"{wwr_gesamt*100:.0f}% der Wandfläche")
+            fenster_data = FensterData(window_wall_ratio=wwr_gesamt)
+        else:
+            st.caption("Fensterflächen in m²:")
+            f_nord = st.number_input("Nord", min_value=0.0, max_value=500.0, value=40.0, step=1.0, key="f_nord_oib")
+            f_ost = st.number_input("Ost", min_value=0.0, max_value=500.0, value=55.0, step=1.0, key="f_ost_oib")
+            f_sued = st.number_input("Süd", min_value=0.0, max_value=500.0, value=80.0, step=1.0, key="f_sued_oib")
+            f_west = st.number_input("West", min_value=0.0, max_value=500.0, value=50.0, step=1.0, key="f_west_oib")
+            fenster_data = FensterData(nord_m2=f_nord, ost_m2=f_ost, sued_m2=f_sued, west_m2=f_west)
+            st.caption(f"Gesamt: {f_nord + f_ost + f_sued + f_west:.1f} m²")
+
+        g_wert = st.slider("g-Wert Fenster (SHGC)", min_value=0.1, max_value=0.9, value=0.65, step=0.05, key="g_wert_oib")
+
+    # ========== PHASE 2: GEOMETRIE-MODUS ==========
+    st.markdown("---")
+    st.markdown("### Phase 2️⃣: Geometrie-Erstellung")
+    st.caption("Wählen Sie, wie die 3D-Geometrie aus den OIB-Daten erstellt werden soll")
+
+    geometrie_modus = st.radio(
+        "Geometrie-Modus:",
+        options=[m.value for m in GeometrieModus],
+        index=0,
+        horizontal=True,
+        help="Automatisch: System berechnet L/W/H | Manuell: Sie geben L/W/H ein | Hybrid: Sie geben L, System berechnet W/H"
+    )
+
+    col_geo1, col_geo2 = st.columns([1, 1])
+
+    with col_geo1:
+        anzahl_geschosse = st.number_input(
+            "Anzahl Geschosse *",
+            min_value=1,
+            max_value=20,
+            value=3,
+            step=1,
+            help="Anzahl der Geschosse bestimmt die vertikale Zonierung des Modells",
+            key="geschosse_oib"
+        )
+
+        # Automatisch berechnete Geschosshöhe aus Volumen-Constraint
+        # H_total = V / Grundfläche
+        # Bei quadratischem Gebäude (AR≈1.8 Hint): Grundfläche ≈ √(Brutto-Volumen * AR_hint)
+        # Geschosshöhe = H_total / Anzahl_Geschosse
+        if brutto_volumen > 0 and anzahl_geschosse > 0:
+            # Schätzung der Grundfläche aus Brutto-Grundfläche (aus Phase 1)
+            # Annahme: Brutto-Grundfläche ≈ Grundfläche pro Geschoss
+            estimated_floor_area = bruttoflaeche / anzahl_geschosse if bruttoflaeche > 0 else brutto_volumen / (anzahl_geschosse * 3.0)
+            estimated_total_height = brutto_volumen / estimated_floor_area if estimated_floor_area > 0 else anzahl_geschosse * 2.7
+            auto_geschosshoehe = estimated_total_height / anzahl_geschosse
+
+            st.info(f"""
+            **📏 Automatisch berechnet aus Volumen-Constraint:**
+            - Geschosshöhe: **{auto_geschosshoehe:.2f} m**
+            - Gesamthöhe: **{estimated_total_height:.2f} m**
+
+            ℹ️ Diese Werte ergeben sich aus V={brutto_volumen:.0f}m³ ÷ {anzahl_geschosse} Geschosse
+            """)
+            geschosshoehe = auto_geschosshoehe
+        else:
+            geschosshoehe = 2.7
+            st.warning("⚠️ Brutto-Volumen erforderlich für Geschosshöhen-Berechnung")
+
+    with col_geo2:
+        if geometrie_modus == GeometrieModus.AUTOMATISCH.value:
+            aspect_ratio = st.slider(
+                "Länge/Breite-Verhältnis (Hint)",
+                min_value=1.0,
+                max_value=3.0,
+                value=1.8,
+                step=0.1,
+                help="1.0=quadratisch, 3.0=langgestreckt",
+                key="ar_oib"
+            )
+            manual_length = None
+            manual_width = None
+            manual_height = None
+
+        elif geometrie_modus == GeometrieModus.MANUELL.value:
+            st.caption("Geben Sie L, W, H manuell ein:")
+            manual_length = st.number_input("Länge (m)", min_value=5.0, max_value=200.0, value=20.0, step=0.5, key="ml_oib")
+            manual_width = st.number_input("Breite (m)", min_value=5.0, max_value=200.0, value=15.0, step=0.5, key="mw_oib")
+            manual_height = st.number_input("Höhe (m)", min_value=3.0, max_value=100.0, value=8.1, step=0.1, key="mh_oib")
+            aspect_ratio = 1.5  # Nicht verwendet
+
+        elif geometrie_modus == GeometrieModus.HYBRID.value:
+            st.caption("Geben Sie Länge ein, Rest wird berechnet:")
+            manual_length = st.number_input("Länge (m)", min_value=5.0, max_value=200.0, value=20.0, step=0.5, key="hl_oib")
+            aspect_ratio = 1.5  # Nicht verwendet
+            manual_width = None
+            manual_height = None
+
+    luftwechsel = st.slider(
+        "Luftwechselrate (1/h)",
+        min_value=0.0,
+        max_value=3.0,
+        value=0.6,
+        step=0.1,
+        help="Gesamt-Luftwechsel (Infiltration + mechanische Lüftung)",
+        key="lw_oib"
+    )
+
+    # ========== GEOMETRIE-BERECHNUNG ==========
+    st.markdown("---")
+
+    if st.button("🔍 Geometrie berechnen & validieren", type="primary", key="calc_geometry_oib"):
+        with st.spinner("Berechne Geometrie aus OIB-Daten..."):
+            try:
+                # Erstelle vollständiges EnergieausweisInput
+                ea_input = EnergieausweisInput(
+                    # Pflichtfelder
+                    bruttoflaeche_m2=bruttoflaeche,
+                    u_wert_wand=u_wand,
+                    u_wert_dach=u_dach,
+                    u_wert_boden=u_boden,
+                    u_wert_fenster=u_fenster,
+                    # OIB 12.2
+                    bezugsflaeche_m2=bezugsflaeche,
+                    brutto_volumen_m3=brutto_volumen,
+                    huellflaeche_gesamt_m2=huellflaeche_gesamt,
+                    kompaktheit=kompaktheit,
+                    charakteristische_laenge_m=char_laenge,
+                    bauweise=Bauweise(bauweise),
+                    klimaregion=klimaregion,
+                    heizgradtage_kd=heizgradtage,
+                    heiztage=heiztage,
+                    norm_aussentemperatur_c=norm_aussentemp,
+                    klima_quelle=KlimaQuelle(klima_quelle),
+                    art_der_lueftung=LueftungsArt(art_lueftung),
+                    soll_innentemperatur_c=soll_innentemp,
+                    co2_emissionen_kg_m2a=co2_emissionen,
+                    geometrie_modus=GeometrieModus(geometrie_modus),
+                    # Geometrie
+                    anzahl_geschosse=anzahl_geschosse,
+                    geschosshoehe_m=geschosshoehe,
+                    aspect_ratio_hint=aspect_ratio,
+                    # Fenster & Lüftung
+                    fenster=fenster_data,
+                    g_wert_fenster=g_wert,
+                    luftwechselrate_h=luftwechsel,
+                    # Metadata
+                    gebaeudetyp=GebaeudeTyp(gebaeudetyp),
+                )
+
+                # Verwende DirectOIBSolver
+                oib_solver = DirectOIBSolver()
+                solution = oib_solver.solve(
+                    ea_input,
+                    manual_length=manual_length,
+                    manual_width=manual_width,
+                    manual_height=manual_height
+                )
+
+                # Session State speichern
+                st.session_state['ea_input_oib'] = ea_input
+                st.session_state['geo_solution_oib'] = solution
+
+                st.success(f"✅ Geometrie erfolgreich berechnet ({solution.method.value})")
+
+            except Exception as e:
+                st.error(f"❌ Fehler bei Geometrie-Berechnung: {e}")
+                import traceback
+                with st.expander("🐛 Fehlerdetails"):
+                    st.code(traceback.format_exc())
+
+    # ========== GEOMETRIE-VORSCHAU ==========
+    if 'geo_solution_oib' in st.session_state:
+        solution = st.session_state['geo_solution_oib']
+        ea_input = st.session_state['ea_input_oib']
+
+        st.markdown("### 📐 Geometrie-Lösung")
+
+        col_a, col_b, col_c, col_d = st.columns(4)
+        with col_a:
+            st.metric("Länge", f"{solution.length:.2f} m")
+        with col_b:
+            st.metric("Breite", f"{solution.width:.2f} m")
+        with col_c:
+            st.metric("Höhe", f"{solution.height:.2f} m")
+        with col_d:
+            st.metric("Geschosse", solution.num_floors)
+
+        # Berechne Hüllflächen-Komponenten für mittleren U-Wert
+        perimeter = 2 * (solution.length + solution.width)
+        wall_area_total = perimeter * solution.height
+        roof_area = solution.floor_area
+        floor_area = solution.floor_area
+
+        # Fensterfläche aus WWR berechnen
+        wwr = ea_input.fenster.window_wall_ratio if ea_input.fenster else 0.3
+        window_area = wall_area_total * wwr
+        wall_area_opaque = wall_area_total - window_area
+
+        # Gesamt-Hüllfläche (berechnet)
+        envelope_area_calc = wall_area_opaque + roof_area + floor_area + window_area
+
+        # Mittlerer flächengewichteter U-Wert
+        u_mittel = (
+            wall_area_opaque * ea_input.u_wert_wand +
+            roof_area * ea_input.u_wert_dach +
+            floor_area * ea_input.u_wert_boden +
+            window_area * ea_input.u_wert_fenster
+        ) / envelope_area_calc if envelope_area_calc > 0 else 0
+
+        # Netto-Werte (ca. 85% von Brutto für Wohngebäude)
+        netto_grundflaeche = ea_input.bezugsflaeche_m2  # Direkt aus OIB
+        netto_volumen_estimate = solution.volume * 0.85  # Schätzung
+
+        col_e, col_f, col_g, col_h = st.columns(4)
+        with col_e:
+            st.metric(
+                "Grundfläche (Brutto)",
+                f"{solution.floor_area:.0f} m²",
+                help=f"Brutto-Grundfläche berechnet: {solution.floor_area:.0f} m² | OIB-Eingabe: {ea_input.bruttoflaeche_m2:.0f} m²"
+            )
+        with col_f:
+            st.metric(
+                "Bezugsfläche",
+                f"{netto_grundflaeche:.0f} m²",
+                help=f"Bezugs-Grundfläche nach OIB RL6 (Nettofläche): {netto_grundflaeche:.0f} m²"
+            )
+        with col_g:
+            st.metric(
+                "Volumen (Brutto)",
+                f"{solution.volume:.0f} m³",
+                help=f"Brutto-Volumen berechnet: {solution.volume:.0f} m³ | OIB-Eingabe: {ea_input.brutto_volumen_m3:.0f} m³"
+            )
+        with col_h:
+            st.metric("A/V (berechnet)", f"{solution.av_ratio:.3f} m⁻¹")
+
+        col_i, col_j, col_k = st.columns(3)
+        with col_i:
+            st.metric(
+                "Hüllfläche (berechnet)",
+                f"{envelope_area_calc:.0f} m²",
+                help=f"Berechnet: {envelope_area_calc:.0f} m² | OIB-Eingabe: {ea_input.huellflaeche_gesamt_m2:.0f} m² | Δ: {abs(envelope_area_calc - ea_input.huellflaeche_gesamt_m2):.0f} m²"
+            )
+        with col_j:
+            st.metric(
+                "Mittlerer U-Wert",
+                f"{u_mittel:.3f} W/m²K",
+                help=f"Flächengewichtet: ({wall_area_opaque:.0f}m²×{ea_input.u_wert_wand:.2f} + {roof_area:.0f}m²×{ea_input.u_wert_dach:.2f} + {floor_area:.0f}m²×{ea_input.u_wert_boden:.2f} + {window_area:.0f}m²×{ea_input.u_wert_fenster:.2f}) / {envelope_area_calc:.0f}m²"
+            )
+        with col_k:
+            st.metric("Fensterflächenanteil", f"{wwr*100:.0f}%")
+
+        # Konfidenz
+        confidence_color = "🟢" if solution.confidence > 0.8 else "🟡" if solution.confidence > 0.6 else "🔴"
+        st.info(f"{confidence_color} **Konfidenz:** {solution.confidence*100:.0f}% | **Methode:** {solution.method.value}")
+
+        # Warnungen
+        if solution.warnings:
+            with st.expander("⚠️ Geometrie-Warnungen"):
+                for warning in solution.warnings:
+                    st.warning(warning)
+
+        # OIB-Warnungen
+        if ea_input.oib_warnings:
+            with st.expander("⚠️ OIB-Konsistenz-Warnungen"):
+                for warning in ea_input.oib_warnings:
+                    st.warning(warning)
+
+        # ========== IDF-GENERIERUNG ==========
+        st.markdown("---")
+        st.markdown("### 🏗️ 5-Zone-IDF erstellen")
+
+        if st.button("🚀 5-Zone-IDF jetzt erstellen", type="primary", key="create_5zone_oib"):
+            with st.spinner("Erstelle 5-Zone-Modell aus OIB-Daten..."):
+                try:
+                    generator = FiveZoneGenerator()
+                    output_dir = Path(__file__).parent.parent.parent.parent / "output" / "energieausweis"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    output_path = output_dir / "gebaeude_5zone_oib.idf"
+
+                    idf = generator.create_from_energieausweis(
+                        ea_data=ea_input,
+                        output_path=output_path
+                    )
+
+                    zones = idf.idfobjects["ZONE"]
+                    surfaces = idf.idfobjects["BUILDINGSURFACE:DETAILED"]
+                    windows = idf.idfobjects["FENESTRATIONSURFACE:DETAILED"]
+
+                    st.success(f"✅ IDF erstellt: `{output_path.name}`")
+
+                    # BuildingModel mit OIB-Metadaten
+                    building_model = BuildingModel(
+                        source="oib_energieausweis",
+                        gebaeudetyp=ea_input.gebaeudetyp.value,
+                        num_zones=len(zones),
+                        idf_path=output_path,
+                        has_hvac=False,
+                        geometry_summary={
+                            'length': solution.length,
+                            'width': solution.width,
+                            'height': solution.height,
+                            'num_floors': solution.num_floors,
+                            'total_floor_area': solution.total_floor_area,
+                            'volume': solution.volume,
+                            'av_ratio': solution.av_ratio,
+                            'confidence': solution.confidence,
+                            'method': solution.method.value,
+                            # OIB-Metadaten
+                            'oib_brutto_grundflaeche': ea_input.bruttoflaeche_m2,
+                            'oib_bezugsflaeche': ea_input.bezugsflaeche_m2,
+                            'oib_brutto_volumen': ea_input.brutto_volumen_m3,
+                            'oib_huellflaeche': ea_input.huellflaeche_gesamt_m2,
+                            'oib_kompaktheit': ea_input.kompaktheit,
+                            'oib_char_laenge': ea_input.charakteristische_laenge_m,
+                            'oib_mittlerer_u_wert': u_mittel,
+                            'oib_klimaregion': ea_input.klimaregion,
+                            'oib_heizgradtage': ea_input.heizgradtage_kd,
+                            'oib_heiztage': ea_input.heiztage,
+                            'oib_norm_aussentemp': ea_input.norm_aussentemperatur_c,
+                        }
+                    )
+
+                    # Session State
+                    st.session_state['idf'] = idf
+                    st.session_state['idf_path'] = output_path
+                    st.session_state['building_model'] = building_model
+                    st.session_state['geometry_source'] = 'oib_energieausweis'
+                    st.session_state['geometry_method'] = 'oib_energieausweis'
+                    st.session_state['geometry_valid'] = True
+
+                    # Visualisierungsdaten für Vorschau-Tab
+                    # Erstelle Zonen-Layout für ALLE Geschosse (für Visualisierung)
+                    perimeter_calc = PerimeterCalculator()
+                    wwr = ea_input.fenster.window_wall_ratio or 0.3
+
+                    # Multi-Floor Layouts erstellen
+                    all_floor_layouts = perimeter_calc.create_multi_floor_layout(
+                        building_length=solution.length,
+                        building_width=solution.width,
+                        floor_height=solution.floor_height,
+                        num_floors=solution.num_floors,
+                        wwr=wwr
+                    )
+
+                    # Konvertiere alle Zonen aller Geschosse zu Dict
+                    all_zones_dict = []
+                    for floor_num, floor_layout in all_floor_layouts.items():
+                        for zone_name, zone_geom in floor_layout.all_zones.items():
+                            all_zones_dict.append({
+                                'floor': floor_num,
+                                'zone_name': zone_name,
+                                'name': zone_geom.name,
+                                'x_origin': zone_geom.x_origin,
+                                'y_origin': zone_geom.y_origin,
+                                'z_origin': zone_geom.z_origin,
+                                'length': zone_geom.length,
+                                'width': zone_geom.width,
+                                'height': zone_geom.height,
+                                'floor_area': zone_geom.floor_area,
+                            })
+
+                    # Erstes Geschoss separat für 2D-Grundriss
+                    zone_layout_first_floor_dict = {}
+                    for zone_name, zone_geom in all_floor_layouts[0].all_zones.items():
+                        zone_layout_first_floor_dict[zone_name] = {
+                            'name': zone_geom.name,
+                            'x_origin': zone_geom.x_origin,
+                            'y_origin': zone_geom.y_origin,
+                            'z_origin': zone_geom.z_origin,
+                            'length': zone_geom.length,
+                            'width': zone_geom.width,
+                            'height': zone_geom.height,
+                            'floor_area': zone_geom.floor_area,
+                        }
+
+                    st.session_state['visualization_data'] = {
+                        'length': solution.length,
+                        'width': solution.width,
+                        'height': solution.height,
+                        'num_floors': solution.num_floors,
+                        'floor_area': solution.floor_area,
+                        'volume': solution.volume,
+                        'av_ratio': solution.av_ratio,
+                        'zone_layout': zone_layout_first_floor_dict,  # Erstes Geschoss für 2D-Grundriss
+                        'all_zones': all_zones_dict,  # ALLE Zonen aller Geschosse für 3D
+                        'window_wall_ratio': wwr,
+                    }
+
+                    col_s1, col_s2, col_s3 = st.columns(3)
+                    with col_s1:
+                        st.metric("Zonen", len(zones))
+                    with col_s2:
+                        st.metric("Surfaces", len(surfaces))
+                    with col_s3:
+                        st.metric("Fenster", len(windows))
+
+                    st.info("✅ Wechseln Sie zu **Vorschau** für die 3D-Ansicht oder zu **HVAC** für die System-Konfiguration.")
+
+                except Exception as e:
+                    st.error(f"❌ Fehler: {e}")
+                    import traceback
+                    with st.expander("🐛 Details"):
+                        st.code(traceback.format_exc())
+
+    else:
+        st.info("👆 Klicken Sie auf 'Geometrie berechnen & validieren' um zu starten.")
 
 
 # ============================================================================
@@ -575,7 +906,7 @@ with tab3:
 
         Bitte erstellen Sie zuerst eine Geometrie:
         - **Tab "Einfache Eingabe"**: Schnelle parametrische Erstellung
-        - **Tab "Energieausweis"**: Detaillierte 5-Zone-Rekonstruktion
+        - **Tab "Energieausweis"**: Detaillierte 5-Zone-Rekonstruktion (OIB RL6 12.2)
         """)
     else:
         method = st.session_state.get('geometry_method', 'unknown')
@@ -584,6 +915,10 @@ with tab3:
         # Header mit Methode
         method_emoji = "📐" if method == 'simplebox' else "📋"
         method_name = "Einfache Eingabe (SimpleBox)" if method == 'simplebox' else "Energieausweis (5-Zone)"
+
+        if method == 'oib_energieausweis':
+            method_emoji = "🇦🇹"
+            method_name = "OIB RL6 12.2-konforme Eingabe (5-Zone)"
 
         st.success(f"{method_emoji} **Aktive Methode:** {method_name}")
 

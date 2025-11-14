@@ -8,8 +8,8 @@ from eppy.modeleditor import IDF
 from core.config import get_config
 from core.materialien import add_basic_constructions
 
-from features.geometrie.models.energieausweis_input import EnergieausweisInput
-from features.geometrie.utils.geometry_solver import GeometrySolver, GeometrySolution
+from features.geometrie.models.energieausweis_input import EnergieausweisInput, GeometrieModus
+from features.geometrie.utils.geometry_solver import GeometrySolver, DirectOIBSolver, GeometrySolution
 from features.geometrie.utils.perimeter_calculator import (
     PerimeterCalculator,
     ZoneLayout,
@@ -46,7 +46,8 @@ class FiveZoneGenerator:
         self.config = config or get_config()
 
         # Geometry utilities
-        self.geometry_solver = GeometrySolver()
+        self.geometry_solver = GeometrySolver()  # Legacy solver
+        self.oib_solver = DirectOIBSolver()  # OIB RL6 12.2-konformer Solver
         self.perimeter_calc = PerimeterCalculator()
         self.fenster_dist = FensterDistribution()
 
@@ -79,7 +80,20 @@ class FiveZoneGenerator:
             sim_settings = {}
 
         # 1. Geometrie rekonstruieren
-        geo_solution = self.geometry_solver.solve(ea_data)
+        # Prüfe ob OIB-Modus (vollständige OIB 12.2-Daten vorhanden)
+        use_oib_solver = (
+            hasattr(ea_data, 'geometrie_modus') and
+            ea_data.geometrie_modus is not None and
+            ea_data.brutto_volumen_m3 is not None and
+            ea_data.huellflaeche_gesamt_m2 is not None
+        )
+
+        if use_oib_solver:
+            # Verwende DirectOIBSolver für OIB-konforme Eingaben
+            geo_solution = self.oib_solver.solve(ea_data)
+        else:
+            # Verwende Legacy GeometrySolver für alte Eingaben (Rückwärtskompatibilität)
+            geo_solution = self.geometry_solver.solve(ea_data)
 
         # 2. Multi-Floor Zonen-Layouts erstellen
         wwr_avg = ea_data.fenster.window_wall_ratio or 0.3

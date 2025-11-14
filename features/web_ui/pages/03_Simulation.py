@@ -36,7 +36,7 @@ if not building_model and not has_geometry:
 # Für 5-Zone: HVAC muss im IDF sein (has_hvac = True)
 # Für SimpleBox: hvac_config reicht
 if building_model:
-    if building_model.source == "energieausweis" and not building_model.has_hvac:
+    if building_model.source in ["energieausweis", "oib_energieausweis"] and not building_model.has_hvac:
         st.warning("⚠️ Bitte konfigurieren Sie zuerst das **HVAC-System** auf der HVAC-Seite.")
         st.stop()
     elif building_model.source == "simplebox" and 'hvac_config' not in st.session_state:
@@ -46,6 +46,42 @@ elif has_geometry and 'hvac_config' not in st.session_state:
     # Legacy SimpleBox
     st.warning("⚠️ Bitte konfigurieren Sie zuerst das **HVAC-System**.")
     st.stop()
+
+# Aktives Modell anzeigen
+st.subheader("🎯 Ausgewähltes Gebäudemodell")
+if building_model:
+    if building_model.source in ["energieausweis", "oib_energieausweis"]:
+        model_type = "OIB RL6 12.2-konforme Eingabe" if building_model.source == "oib_energieausweis" else "Energieausweis-Import"
+        st.success(f"""
+        **✅ 5-Zone-Modell bereit für Simulation**
+
+        - **Quelle:** {model_type}
+        - **Gebäudetyp:** {building_model.gebaeudetyp}
+        - **Zonen:** {building_model.num_zones}
+        - **Fläche:** {building_model.geometry_summary.get('total_floor_area', 0):.0f} m²
+        - **HVAC:** {'✅ Konfiguriert' if building_model.has_hvac else '❌ Noch nicht konfiguriert'}
+        - **IDF-Datei:** `{building_model.idf_path.name if building_model.idf_path else 'N/A'}`
+
+        💡 *Um ein anderes Modell zu verwenden, gehen Sie zurück zur **Geometrie-Seite** und erstellen/laden Sie ein neues Modell.*
+        """)
+    else:
+        st.success(f"""
+        **✅ SimpleBox-Modell bereit für Simulation**
+
+        - **Abmessungen:** {building_model.geometry_summary['length']:.1f}m × {building_model.geometry_summary['width']:.1f}m × {building_model.geometry_summary['height']:.1f}m
+        - **Zonen:** {building_model.num_zones}
+        - **Fläche:** {building_model.geometry_summary.get('total_floor_area', 0):.0f} m²
+
+        💡 *Um ein anderes Modell zu verwenden, gehen Sie zurück zur **Geometrie-Seite** und erstellen/laden Sie ein neues Modell.*
+        """)
+elif has_geometry:
+    st.success("""
+    **✅ SimpleBox-Modell (Legacy) bereit für Simulation**
+
+    💡 *Um ein anderes Modell zu verwenden, gehen Sie zurück zur **Geometrie-Seite**.*
+    """)
+
+st.markdown("---")
 
 # Info-Box
 st.info("""
@@ -62,8 +98,9 @@ with col1:
     st.markdown("**Gebäudemodell**")
     if building_model:
         geom = building_model.geometry_summary
-        if building_model.source == "energieausweis":
-            st.write(f"- Quelle: 5-Zone-Modell")
+        if building_model.source in ["energieausweis", "oib_energieausweis"]:
+            model_type = "OIB RL6 12.2" if building_model.source == "oib_energieausweis" else "Energieausweis"
+            st.write(f"- Quelle: 5-Zone-Modell ({model_type})")
             st.write(f"- Typ: {building_model.gebaeudetyp}")
             st.write(f"- Zonen: {building_model.num_zones}")
             st.write(f"- Fläche: {geom.get('total_floor_area', 0):.1f} m²")
@@ -84,7 +121,7 @@ with col1:
 
 with col2:
     st.markdown("**HVAC-System**")
-    if building_model and building_model.source == "energieausweis":
+    if building_model and building_model.source in ["energieausweis", "oib_energieausweis"]:
         st.write(f"- Typ: Ideal Loads")
         st.write(f"- Status: ✅ Konfiguriert")
         st.write(f"- Zonen: {building_model.num_zones}")
@@ -98,7 +135,7 @@ with col2:
 with col3:
     st.markdown("**Simulation**")
     if building_model:
-        model_name = "5-Zone-Modell" if building_model.source == "energieausweis" else "SimpleBox"
+        model_name = "5-Zone-Modell" if building_model.source in ["energieausweis", "oib_energieausweis"] else "SimpleBox"
         st.write(f"- Modell: {model_name}")
     else:
         st.write(f"- Modell: SimpleBox")
@@ -254,9 +291,10 @@ if st.button("▶️ Simulation starten", type="primary", use_container_width=Tr
             idf_path = output_dir / "building.idf"
 
             # Unterschiedliche IDF-Behandlung je nach Quelle
-            if building_model and building_model.source == "energieausweis":
+            if building_model and building_model.source in ["energieausweis", "oib_energieausweis"]:
                 # 5-Zone-Modell: IDF aus Datei laden (bereits mit HVAC)
-                status_text.info("🏗️ Lade 5-Zone-IDF...")
+                model_type = "OIB RL6 12.2" if building_model.source == "oib_energieausweis" else "Energieausweis"
+                status_text.info(f"🏗️ Lade 5-Zone-IDF ({model_type})...")
                 progress_bar.progress(10)
 
                 source_idf_path = building_model.idf_path

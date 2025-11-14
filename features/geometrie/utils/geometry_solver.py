@@ -14,6 +14,8 @@ class SolutionMethod(str, Enum):
     EXACT = "exact"  # Vollständige Hüllflächen-Daten vorhanden
     HEURISTIC = "heuristic"  # Teilweise Daten, mit Annahmen
     FALLBACK = "fallback"  # Minimal-Daten, starke Annahmen
+    OIB_DIRECT = "oib_direct"  # Vollständige OIB 12.2-Daten (V, A, A/V, ℓc)
+    OIB_MANUAL = "oib_manual"  # OIB-Daten + Nutzer gibt L/W/H manuell ein
 
 
 @dataclass
@@ -286,6 +288,326 @@ class GeometrySolver:
                 f"Aspect Ratio ({solution.aspect_ratio:.1f}) sehr niedrig - "
                 f"W > L (ungewöhnlich)"
             )
+
+
+class DirectOIBSolver:
+    """
+    Berechnet Gebäudegeometrie aus vollständigen OIB 12.2-Angaben.
+
+    Gegeben:
+        - V (Brutto-Volumen)
+        - A (Hüllfläche gesamt)
+        - A/V (Kompaktheit)
+        - ℓc (Charakteristische Länge)
+        - n_floors (Anzahl Geschosse)
+        - AR (Aspect Ratio Hint)
+
+    Gesucht:
+        - L, W, H
+
+    Strategie:
+        1. Berechne H aus n_floors × h_floor (Annahme: h_floor = 3.0m oder aus Input)
+        2. Aus V = L × W × H → L × W = V / H
+        3. Aus AR = L / W → L = AR × W
+        4. Einsetzen: AR × W² = V / H → W = √(V / (H × AR))
+        5. L = AR × W
+        6. Validiere gegen gegebenes A/V
+
+    Falls nicht konsistent: Iterative Anpassung von H.
+    """
+
+    # Typische Geschosshöhen
+    FLOOR_HEIGHT_DEFAULT = 3.0  # m
+    FLOOR_HEIGHT_MIN = 2.3
+    FLOOR_HEIGHT_MAX = 4.5
+
+    # Toleranzen für Konsistenz-Checks
+    AV_TOLERANCE = 0.05  # 5% Abweichung erlaubt
+    LC_TOLERANCE = 0.05  # 5% Abweichung erlaubt
+
+    def solve(
+        self,
+        ea_data: EnergieausweisInput,
+        manual_length: Optional[float] = None,
+        manual_width: Optional[float] = None,
+        manual_height: Optional[float] = None
+    ) -> GeometrySolution:
+        """
+        Hauptmethode: Berechnet Geometrie aus vollständigen OIB-Daten.
+
+        Args:
+            ea_data: EnergieausweisInput mit vollständigen OIB 12.2-Daten
+            manual_length: Optional manuell eingegebene Länge [m]
+            manual_width: Optional manuell eingegebene Breite [m]
+            manual_height: Optional manuell eingegebene Höhe [m]
+
+        Returns:
+            GeometrySolution
+
+        Raises:
+            ValueError: Wenn erforderliche OIB-Daten fehlen
+        """
+
+        # Prüfe ob OIB-Daten vollständig
+        if not self._has_required_oib_data(ea_data):
+            raise ValueError(
+                "Unvollständige OIB-Daten. Erforderlich: "
+                "brutto_volumen_m3, huellflaeche_gesamt_m2, anzahl_geschosse"
+            )
+
+        # Entscheide Modus: Automatisch vs. Manuell vs. Hybrid
+        if manual_length and manual_width and manual_height:
+            return self._solve_manual(ea_data, manual_length, manual_width, manual_height)
+        elif manual_length and not manual_width and not manual_height:
+            return self._solve_hybrid(ea_data, manual_length)
+        else:
+            return self._solve_automatic(ea_data)
+
+    def _has_required_oib_data(self, ea_data: EnergieausweisInput) -> bool:
+        """Prüft ob minimale OIB-Daten vorhanden sind."""
+        return all([
+            ea_data.brutto_volumen_m3 is not None,
+            ea_data.huellflaeche_gesamt_m2 is not None,
+            ea_data.anzahl_geschosse > 0
+        ])
+
+    def _solve_automatic(self, ea_data: EnergieausweisInput) -> GeometrySolution:
+        """
+        Automatische Geometrie-Berechnung aus OIB-Daten.
+
+        Nutzt Aspect Ratio Hint und Geschosshöhe-Annahme.
+        """
+        warnings = []
+
+        # Daten extrahieren
+        V = ea_data.brutto_volumen_m3
+        A = ea_data.huellflaeche_gesamt_m2
+        n_floors = ea_data.anzahl_geschosse
+        AR = ea_data.aspect_ratio_hint
+
+        # 1. Geschosshöhe bestimmen
+        h_floor = ea_data.geschosshoehe_m
+        if not (self.FLOOR_HEIGHT_MIN <= h_floor <= self.FLOOR_HEIGHT_MAX):
+            warnings.append(
+                f"Geschosshöhe ({h_floor:.2f}m) außerhalb üblichem Bereich "
+                f"({self.FLOOR_HEIGHT_MIN}-{self.FLOOR_HEIGHT_MAX}m)"
+            )
+
+        H = n_floors * h_floor
+
+        # 2. Berechne L, W aus V und AR
+        # V = L × W × H
+        # AR = L / W → L = AR × W
+        # → V = AR × W² × H
+        # → W = √(V / (AR × H))
+
+        floor_area = V / H
+        W = math.sqrt(floor_area / AR)
+        L = AR * W
+
+        # 3. Validiere gegen gegebenes A/V
+        A_calculated = self._calculate_envelope_area(L, W, H)
+        AV_calculated = A_calculated / V
+
+        if ea_data.kompaktheit is not None:
+            AV_given = ea_data.kompaktheit
+            diff_percent = abs(AV_calculated - AV_given) / AV_given * 100
+
+            if diff_percent > self.AV_TOLERANCE * 100:
+                warnings.append(
+                    f"A/V-Inkonsistenz: Berechnet {AV_calculated:.3f} m⁻¹, "
+                    f"gegeben {AV_given:.3f} m⁻¹ (Abweichung: {diff_percent:.1f}%)"
+                )
+
+                # Versuche iterative Anpassung von H
+                H_adjusted = self._adjust_height_for_av(L, W, V, AV_given, n_floors)
+                if H_adjusted is not None:
+                    H = H_adjusted
+                    h_floor = H / n_floors
+                    warnings.append(
+                        f"Höhe angepasst auf {H:.2f}m (Geschosshöhe: {h_floor:.2f}m) "
+                        f"für bessere A/V-Konsistenz"
+                    )
+
+        # 4. Validiere gegen gegebene Hüllfläche
+        A_calculated_final = self._calculate_envelope_area(L, W, H)
+        diff_percent_A = abs(A_calculated_final - A) / A * 100
+
+        if diff_percent_A > 5:
+            warnings.append(
+                f"Hüllfläche-Abweichung: Berechnet {A_calculated_final:.1f}m², "
+                f"gegeben {A:.1f}m² (Abweichung: {diff_percent_A:.1f}%)"
+            )
+
+        # 5. Erstelle Lösung
+        solution = GeometrySolution(
+            length=L,
+            width=W,
+            height=H,
+            num_floors=n_floors,
+            confidence=0.85,  # Gut, aber nicht perfekt (Annahmen gemacht)
+            method=SolutionMethod.OIB_DIRECT,
+            warnings=warnings
+        )
+
+        return solution
+
+    def _solve_manual(
+        self,
+        ea_data: EnergieausweisInput,
+        length: float,
+        width: float,
+        height: float
+    ) -> GeometrySolution:
+        """
+        Nutzer gibt L, W, H manuell ein.
+
+        Validiert nur gegen OIB-Daten (V, A, A/V).
+        """
+        warnings = []
+
+        # Validiere gegen OIB-Daten
+        V_calculated = length * width * height
+        V_given = ea_data.brutto_volumen_m3
+
+        diff_percent_V = abs(V_calculated - V_given) / V_given * 100
+        if diff_percent_V > 10:
+            warnings.append(
+                f"Volumen-Abweichung: L×W×H = {V_calculated:.1f}m³, "
+                f"aber OIB-Angabe = {V_given:.1f}m³ (Abweichung: {diff_percent_V:.1f}%)"
+            )
+
+        # Prüfe Hüllfläche
+        A_calculated = self._calculate_envelope_area(length, width, height)
+        A_given = ea_data.huellflaeche_gesamt_m2
+
+        diff_percent_A = abs(A_calculated - A_given) / A_given * 100
+        if diff_percent_A > 10:
+            warnings.append(
+                f"Hüllfläche-Abweichung: Berechnet {A_calculated:.1f}m², "
+                f"aber OIB-Angabe = {A_given:.1f}m² (Abweichung: {diff_percent_A:.1f}%)"
+            )
+
+        # Prüfe A/V
+        AV_calculated = A_calculated / V_calculated
+        if ea_data.kompaktheit is not None:
+            AV_given = ea_data.kompaktheit
+            diff_percent_AV = abs(AV_calculated - AV_given) / AV_given * 100
+
+            if diff_percent_AV > 10:
+                warnings.append(
+                    f"A/V-Abweichung: Berechnet {AV_calculated:.3f} m⁻¹, "
+                    f"aber OIB-Angabe = {AV_given:.3f} m⁻¹ (Abweichung: {diff_percent_AV:.1f}%)"
+                )
+
+        solution = GeometrySolution(
+            length=length,
+            width=width,
+            height=height,
+            num_floors=ea_data.anzahl_geschosse,
+            confidence=1.0,  # User-Input hat höchste Priorität
+            method=SolutionMethod.OIB_MANUAL,
+            warnings=warnings
+        )
+
+        return solution
+
+    def _solve_hybrid(
+        self,
+        ea_data: EnergieausweisInput,
+        length: float
+    ) -> GeometrySolution:
+        """
+        Hybrid: Nutzer gibt L an, System berechnet W und H.
+
+        Gegeben:
+            - L (manuell)
+            - V, A (OIB)
+            - n_floors
+
+        Gesucht:
+            - W, H
+
+        Lösung:
+            - H aus Geschosshöhe: H = n_floors × h_floor
+            - V = L × W × H → W = V / (L × H)
+        """
+        warnings = []
+
+        V = ea_data.brutto_volumen_m3
+        n_floors = ea_data.anzahl_geschosse
+        h_floor = ea_data.geschosshoehe_m
+
+        H = n_floors * h_floor
+        W = V / (length * H)
+
+        # Validierung
+        A_calculated = self._calculate_envelope_area(length, W, H)
+        A_given = ea_data.huellflaeche_gesamt_m2
+
+        diff_percent_A = abs(A_calculated - A_given) / A_given * 100
+        if diff_percent_A > 10:
+            warnings.append(
+                f"Hüllfläche-Abweichung: Berechnet {A_calculated:.1f}m², "
+                f"gegeben {A_given:.1f}m² (Abweichung: {diff_percent_A:.1f}%)"
+            )
+
+        solution = GeometrySolution(
+            length=length,
+            width=W,
+            height=H,
+            num_floors=n_floors,
+            confidence=0.90,
+            method=SolutionMethod.OIB_DIRECT,
+            warnings=warnings
+        )
+
+        return solution
+
+    def _calculate_envelope_area(self, L: float, W: float, H: float) -> float:
+        """Berechnet Hüllfläche aus L, W, H."""
+        walls = 2 * (L + W) * H
+        roof_floor = 2 * L * W
+        return walls + roof_floor
+
+    def _adjust_height_for_av(
+        self,
+        L: float,
+        W: float,
+        V: float,
+        target_av: float,
+        n_floors: int,
+        max_iterations: int = 10
+    ) -> Optional[float]:
+        """
+        Iterativ H anpassen, um Ziel-A/V zu erreichen.
+
+        Returns:
+            Angepasste Höhe H oder None falls keine Lösung gefunden
+        """
+        # Binäre Suche
+        H_min = self.FLOOR_HEIGHT_MIN * n_floors
+        H_max = self.FLOOR_HEIGHT_MAX * n_floors
+
+        for _ in range(max_iterations):
+            H_mid = (H_min + H_max) / 2
+
+            # Berechne A/V für diese Höhe
+            # Problem: L, W ändern sich auch wenn H sich ändert (wegen V = const)
+            # Vereinfachung: Nur H variieren, L, W fix
+            A = self._calculate_envelope_area(L, W, H_mid)
+            av = A / V
+
+            if abs(av - target_av) / target_av < self.AV_TOLERANCE:
+                return H_mid
+            elif av < target_av:
+                # Zu kompakt → H erhöhen
+                H_min = H_mid
+            else:
+                # Zu wenig kompakt → H verringern
+                H_max = H_mid
+
+        return None  # Keine Lösung gefunden
 
 
 # ============ UTILITY FUNCTIONS ============

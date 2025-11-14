@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -13,16 +13,17 @@ class BuildingModel(BaseModel):
     Ermöglicht konsistente Speicherung und Verarbeitung von:
     - SimpleBox-Modellen (parametrisch)
     - 5-Zone-Modellen aus Energieausweis (IDF-basiert)
+    - OIB RL6 12.2-konforme Modelle (Energieausweis mit vollständigen Metadaten)
     """
 
-    source: Literal["simplebox", "energieausweis"] = Field(
+    source: Literal["simplebox", "energieausweis", "oib_energieausweis"] = Field(
         ...,
         description="Quelle des Modells"
     )
 
-    geometry_summary: Dict[str, float] = Field(
+    geometry_summary: Dict[str, Union[float, int, str]] = Field(
         ...,
-        description="Zusammenfassung der Geometrie (L/W/H, Flächen, Volumen)"
+        description="Zusammenfassung der Geometrie (L/W/H, Flächen, Volumen) + Metadaten (method, oib_* Felder)"
     )
 
     idf_path: Optional[Path] = Field(
