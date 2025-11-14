@@ -277,11 +277,83 @@ class TabularReportParser:
             source_energy_per_m2_mj=get_value('Total Source Energy', 'Energy Per Total Building Area')
         )
 
+    def _get_design_loads_from_timeseries(self) -> Optional[HVACSizing]:
+        """
+        Fallback: Extrahiert Design Loads aus Zeitreihen-Daten.
+
+        Wird verwendet, wenn Tabular Reports leer sind (z.B. bei IdealLoadsAirSystem).
+
+        Returns:
+            HVACSizing mit Max-Werten aus Zeitreihen, oder None bei Fehler
+        """
+        conn = sqlite3.connect(self.sql_file)
+        try:
+            query = """
+            SELECT
+                d.VariableName,
+                MAX(v.VariableValue) as MaxValue
+            FROM ReportVariableData v
+            JOIN ReportVariableDataDictionary d
+                ON v.ReportVariableDataDictionaryIndex = d.ReportVariableDataDictionaryIndex
+            WHERE d.VariableName LIKE '%Ideal Loads Zone Total Heating Rate%'
+               OR d.VariableName LIKE '%Ideal Loads Zone Total Cooling Rate%'
+            GROUP BY d.VariableName
+            """
+
+            df = pd.read_sql_query(query, conn)
+
+            if df.empty:
+                return None
+
+            heating_w = 0.0
+            cooling_w = 0.0
+
+            for _, row in df.iterrows():
+                if 'Heating' in row['VariableName']:
+                    heating_w += row['MaxValue']
+                elif 'Cooling' in row['VariableName']:
+                    cooling_w += row['MaxValue']
+
+            # Design Days aus SizingPeriod:DesignDay TabularData
+            query_dd = """
+            SELECT RowName, Value
+            FROM TabularDataWithStrings
+            WHERE TableName = 'SizingPeriod:DesignDay'
+            LIMIT 10
+            """
+            df_dd = pd.read_sql_query(query_dd, conn)
+
+            # Parse Design Day Namen (falls verfügbar)
+            heating_dd = ""
+            cooling_dd = ""
+            if not df_dd.empty:
+                # Erste zwei Zeilen sind typischerweise Heating und Cooling Design Days
+                days = df_dd['Value'].dropna().unique()
+                if len(days) >= 1:
+                    heating_dd = str(days[0])
+                if len(days) >= 2:
+                    cooling_dd = str(days[1])
+
+            return HVACSizing(
+                heating_design_load_w=heating_w,
+                cooling_design_load_w=cooling_w,
+                heating_design_load_per_area_w_m2=0.0,  # Nicht verfügbar aus Zeitreihen
+                cooling_design_load_per_area_w_m2=0.0,
+                heating_design_day=heating_dd,
+                cooling_design_day=cooling_dd
+            )
+        except Exception as e:
+            print(f"Warning: Could not extract design loads from timeseries: {e}")
+            return None
+        finally:
+            conn.close()
+
     def get_hvac_sizing(self) -> HVACSizing:
         """
         HVAC Auslegungsgrößen (Design-Lasten).
 
-        Extrahiert aus 'HVACSizingSummary'.
+        Extrahiert aus 'HVACSizingSummary'. Falls leer (z.B. bei IdealLoadsAirSystem),
+        wird auf Zeitreihen-Daten zurückgegriffen.
 
         Returns:
             HVACSizing mit Design-Lasten
@@ -289,7 +361,9 @@ class TabularReportParser:
         df = self._get_tabular_data('HVACSizingSummary')
 
         if df.empty:
-            return HVACSizing()
+            # Fallback auf Zeitreihen
+            fallback = self._get_design_loads_from_timeseries()
+            return fallback if fallback else HVACSizing()
 
         # Helper
         def get_value(table_name: str, property_name: str) -> float:
@@ -314,7 +388,7 @@ class TabularReportParser:
                 return ""
             return str(row.iloc[0]['Value'])
 
-        return HVACSizing(
+        sizing = HVACSizing(
             heating_design_load_w=get_value('Zone Sensible Heating', 'Calculated Design Load'),
             cooling_design_load_w=get_value('Zone Sensible Cooling', 'Calculated Design Load'),
             heating_design_load_per_area_w_m2=get_value('Zone Sensible Heating', 'Calculated Design Load per Area'),
@@ -322,6 +396,16 @@ class TabularReportParser:
             heating_design_day=get_string('Zone Sensible Heating', 'Design Day Name'),
             cooling_design_day=get_string('Zone Sensible Cooling', 'Design Day Name')
         )
+
+        # Wenn Tabular Reports existieren aber leer sind (alle Werte = 0),
+        # verwende Fallback
+        if (sizing.heating_design_load_w == 0.0 and
+            sizing.cooling_design_load_w == 0.0):
+            fallback = self._get_design_loads_from_timeseries()
+            if fallback:
+                return fallback
+
+        return sizing
 
     def get_envelope_performance(self) -> EnvelopePerformance:
         """

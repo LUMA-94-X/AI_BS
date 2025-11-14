@@ -6,6 +6,20 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed - 2025-11-14
+
+#### 🔧 Design Loads: Fallback für IdealLoadsAirSystem
+- **Problem**: HVAC Design Loads waren 0 trotz korrekter IDF-Konfiguration
+- **Root Cause**: `HVACTemplate:Zone:IdealLoadsAirSystem` erzeugt keine physischen HVAC-Komponenten (Coils, Fans, Pumps), daher bleiben die Tabular Reports `HVACSizingSummary` leer
+- **Lösung**: Intelligente Fallback-Logik implementiert
+  - Neue Methode `_get_design_loads_from_timeseries()` in `tabular_reports.py`
+  - Extrahiert MAX-Werte aus `Zone Ideal Loads Zone Total Heating/Cooling Rate`
+  - Design Days aus `SizingPeriod:DesignDay` Tabular Data
+  - Automatische Umschaltung wenn Tabular Reports leer sind (alle Werte = 0)
+- **Ergebnis**: Design Loads werden jetzt korrekt angezeigt (~1,78 kW Heizlast statt 0)
+- **Limitation**: IdealLoadsAirSystem kann keine spezifischen Lasten pro m² liefern (nur Gesamt-kW)
+- **Betroffene Datei**: `features/auswertung/tabular_reports.py` (+67 Zeilen)
+
 ### Added - 2025-11-14
 
 #### 📊 Tabular Reports - Erweiterte EnergyPlus Auswertung
