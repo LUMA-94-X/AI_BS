@@ -105,22 +105,31 @@ class NativeInternalLoadsManager:
         )
         schedules["activity"] = "Activity_Level_Schedule"
 
-        # Lights and equipment schedule (always on for testing)
-        idf.newidfobject(
-            "SCHEDULE:CONSTANT",
-            Name="Always_On_Lights",
-            Schedule_Type_Limits_Name="Fraction",
-            Hourly_Value=1.0,
-        )
-        schedules["lights"] = "Always_On_Lights"
+        # Realistic schedules based on OIB RL6 / ÖNORM B 8110-6
+        # Lights: Average 30% utilization (6h full use / 24h)
+        # Equipment: Average 40% utilization (background loads + active use)
+        if building_type == "office":
+            lights_fraction = 0.4  # Office: 40% average (8-10h workday)
+            equipment_fraction = 0.5  # Office: 50% average (computers, etc.)
+        else:  # residential
+            lights_fraction = 0.3  # Residential: 30% average (evening use)
+            equipment_fraction = 0.4  # Residential: 40% average (fridge, standby, etc.)
 
         idf.newidfobject(
             "SCHEDULE:CONSTANT",
-            Name="Always_On_Equipment",
+            Name="Realistic_Lights",  # Renamed from Always_On
             Schedule_Type_Limits_Name="Fraction",
-            Hourly_Value=1.0,
+            Hourly_Value=lights_fraction,
         )
-        schedules["equipment"] = "Always_On_Equipment"
+        schedules["lights"] = "Realistic_Lights"
+
+        idf.newidfobject(
+            "SCHEDULE:CONSTANT",
+            Name="Realistic_Equipment",  # Renamed from Always_On
+            Schedule_Type_Limits_Name="Fraction",
+            Hourly_Value=equipment_fraction,
+        )
+        schedules["equipment"] = "Realistic_Equipment"
 
         return schedules
 
@@ -171,7 +180,7 @@ class NativeInternalLoadsManager:
         zone_name: str,
         zone_area: float,
         building_type: str = "office",
-        schedule_name: str = "Always_On_Lights",
+        schedule_name: str = "Realistic_Lights",
     ) -> None:
         """Add LIGHTS object to a zone using native eppy approach.
 
@@ -209,7 +218,7 @@ class NativeInternalLoadsManager:
         zone_name: str,
         zone_area: float,
         building_type: str = "office",
-        schedule_name: str = "Always_On_Equipment",
+        schedule_name: str = "Realistic_Equipment",
     ) -> None:
         """Add ELECTRICEQUIPMENT object to a zone using native eppy approach.
 

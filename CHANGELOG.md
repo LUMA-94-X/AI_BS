@@ -8,6 +8,20 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ### Fixed - 2025-11-14
 
+#### ⚡ Interne Lasten: Realistische Schedules nach OIB RL6
+- **Problem**: Interne Lasten (Lights/Equipment) waren unrealistisch hoch
+- **Root Cause**: Schedules auf 100% 24/7 gesetzt ("Always_On" für Testing)
+- **Analyse**: W/m²-Werte sind gut (5 W/m² Lights, 4 W/m² Equipment für Residential)
+- **Lösung**: Realistische durchschnittliche Nutzungsprofile implementiert
+  - **Residential Lights**: 30% Durchschnitt (statt 100%) → ~1,5 W/m² effektiv
+  - **Residential Equipment**: 40% Durchschnitt (statt 100%) → ~1,6 W/m² effektiv
+  - **Office Lights**: 40% Durchschnitt (8-10h Workday)
+  - **Office Equipment**: 50% Durchschnitt (Computers, Standby)
+- **Basis**: OIB RL6 / ÖNORM B 8110-6 Nutzungsprofile
+- **Ergebnis**: Innere Wärmegewinne jetzt realistisch → bessere Heiz-/Kühlbedarf-Berechnung
+- **Betroffene Datei**: `features/internal_loads/native_loads.py` (Zeilen 108-132)
+- **Future Work**: SCHEDULE:COMPACT mit Stunden-Profilen für noch präzisere Simulation
+
 #### 🔧 Design Loads: Fallback für IdealLoadsAirSystem
 - **Problem**: HVAC Design Loads waren 0 trotz korrekter IDF-Konfiguration
 - **Root Cause**: `HVACTemplate:Zone:IdealLoadsAirSystem` erzeugt keine physischen HVAC-Komponenten (Coils, Fans, Pumps), daher bleiben die Tabular Reports `HVACSizingSummary` leer
