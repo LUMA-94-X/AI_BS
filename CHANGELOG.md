@@ -36,27 +36,38 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ### Added - 2025-11-14
 
-#### 🧭 Zonale Auswertung - Nord/Ost/Süd/West/Kern Vergleich
+#### 🧭 Zonale Auswertung - Nord/Ost/Süd/West/Kern Vergleich (COMPLETE!)
 - **Neues Feature**: Vergleich der 5 Gebäudezonen (Quick Win!)
-- **Datenklassen** (`tabular_reports.py`):
+- **Backend** (`tabular_reports.py`):
   - `ZoneData`: Temperaturen, Lasten, Gewinne pro Zone
   - `ZonalComparison`: Container mit Properties für einfachen Zugriff
-- **Parser-Methode**: `get_zonal_comparison()`
-  - Extrahiert aus ReportVariableData (Zeitreihen)
-  - Aggregiert AVG/MIN/MAX/SUM pro Zone und Variable
-  - Automatische Orientierungserkennung (North/East/South/West/Core)
+  - `get_zonal_comparison()`: Extrahiert aus ReportVariableData (Zeitreihen)
+- **Visualisierung** (`visualisierung.py`):
+  - `erstelle_zonalen_vergleich()`: 4-Subplot Dashboard (Temp, Solar, Innere, Heiz/Kühl)
+  - `erstelle_zonale_solar_gewinne_chart()`: Detail-Chart für Orientierungseffekte
+  - Orientierungsspezifische Farben (Blau=Nord, Orange=Süd, etc.)
+- **UI-Integration** (`04_Ergebnisse.py`):
+  - Tab "🏗️ Zonenauswertung" vollständig implementiert
+  - Zonaler Vergleich Dashboard (4 Subplots)
+  - Detaillierte Zonen-Metriken (Tabelle)
+  - Erkenntnisse: Höchste/Niedrigste Solare Gewinne + Delta
+  - Solare Gewinne Detail-Chart
+  - Nur für 5-Zone-Modelle (SimpleBox zeigt Info-Text)
 - **Metriken pro Zone**:
-  - Temperaturen: Durchschnitt, Min, Max
-  - Heiz-/Kühllast: kWh pro Jahr
-  - Solare Gewinne: kWh (zeigt Orientierungs-Effekte!)
-  - Innere Gewinne: Lights + Equipment + People
+  - Temperaturen: Ø, Min, Max
+  - Heiz-/Kühllast [kWh]
+  - Solare Gewinne [kWh] - zeigt Orientierungseffekte!
+  - Innere Gewinne [kWh] (Lights + Equipment + People)
 - **Erkenntnisse aus Testdaten**:
-  - Solare Gewinne variieren stark: Nord 1.074 kWh > Süd 716 kWh > Ost 303 kWh > West 241 kWh
+  - Solare Gewinne: Nord 1.074 > Süd 716 > Ost 303 > West 241 kWh
   - Temperaturen relativ gleichmäßig (23-25°C)
   - Kern-Zone: Keine solaren Gewinne (keine Fenster)
-- **Vorteil**: Daten bereits in SQL verfügbar → Instant-Zugriff
-- **Betroffene Datei**: `features/auswertung/tabular_reports.py` (+120 Zeilen)
-- **Status**: Parser fertig, UI-Integration folgt
+- **Vorteil**: Daten bereits in SQL verfügbar → Instant-Zugriff, keine neuen Output:Variables
+- **Files**:
+  - `features/auswertung/tabular_reports.py` (+120 Zeilen Parser)
+  - `features/auswertung/visualisierung.py` (+210 Zeilen Charts)
+  - `features/web_ui/pages/04_Ergebnisse.py` (+120 Zeilen UI)
+- **Status**: ✅ **VOLLSTÄNDIG IMPLEMENTIERT**
 
 #### 📊 Tabular Reports - Erweiterte EnergyPlus Auswertung
 - **Neues Modul**: `features/auswertung/tabular_reports.py`

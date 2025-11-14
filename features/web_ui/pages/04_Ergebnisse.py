@@ -1056,35 +1056,7 @@ try:
     with tab5:
         st.subheader("🏗️ Zonenauswertung")
 
-        if is_five_zone:
-            st.info("""
-            **5-Zone-Modell erkannt**: Die Zonenauswertung wird in einer zukünftigen Version implementiert.
-            """)
-
-            st.markdown("""
-            Hier werden zukünftig folgende Features verfügbar sein:
-
-            - **Zonenauswahl**: Dropdown zur Auswahl einzelner Zonen (Nord, Ost, Süd, West, Kern)
-            - **Zonen-Kennzahlen**: Fläche, Volumen, Außenwandfläche, WWR
-            - **Zonen-Energiebedarf**: Heizung, Kühlung, Beleuchtung pro Zone
-            - **Zonen-Temperaturverlauf**: Temperaturkurven für einzelne Zonen
-            - **Zonen-Vergleich**: Tabelle und Diagramme zum Vergleich aller Zonen
-            - **Heatmap**: Temperaturverteilung über Zonen und Zeit
-            """)
-
-            # Platzhalter für Zonenauswahl
-            st.markdown("---")
-            st.markdown("### 🔍 Zonen-Auswahl (Platzhalter)")
-
-            zone = st.selectbox(
-                "Zone auswählen:",
-                options=["Nord-Zone", "Ost-Zone", "Süd-Zone", "West-Zone", "Kern-Zone"],
-                help="Wählen Sie eine Zone zur detaillierten Analyse"
-            )
-
-            st.info(f"**{zone}** wurde ausgewählt. Detaillierte Analyse folgt in zukünftiger Version.")
-
-        else:
+        if not is_five_zone:
             st.warning("""
             **SimpleBox-Modell**: Die Zonenauswertung ist nur für **5-Zone-Modelle** verfügbar.
 
@@ -1102,6 +1074,107 @@ try:
             Dies ermöglicht eine detailliertere Analyse der Energiebedarfe nach Orientierung
             und Sonneneinstrahlung.
             """)
+        else:
+            # 5-Zone-Modell: Zonale Daten extrahieren
+            try:
+                from features.auswertung.tabular_reports import TabularReportParser
+
+                parser = TabularReportParser(result.sql_path)
+                zonal = parser.get_zonal_comparison()
+
+                if not zonal.zones:
+                    st.warning("Keine zonalen Daten verfügbar. Simulation könnte fehlgeschlagen sein.")
+                else:
+                    st.success(f"✅ **{len(zonal.zones)} Zonen** erfolgreich analysiert!")
+
+                    # Zonaler Vergleich Dashboard
+                    st.markdown("### 📊 Zonaler Vergleich: Nord/Ost/Süd/West/Kern")
+
+                    st.info("""
+                    **Orientierungseffekte sichtbar machen**:
+                    - **Solare Gewinne** variieren stark nach Orientierung
+                    - **Temperaturen** zeigen Unterschiede zwischen Zonen
+                    - **Heiz-/Kühllasten** können zonenspezifisch analysiert werden
+                    """)
+
+                    # Hauptdashboard
+                    fig_zonal = vis.erstelle_zonalen_vergleich(zonal)
+                    st.plotly_chart(fig_zonal, use_container_width=True)
+
+                    # Detaillierte Zonen-Metriken
+                    st.markdown("---")
+                    st.markdown("### 📋 Detaillierte Zonen-Metriken")
+
+                    # Tabelle mit allen Zonen
+                    zone_data = []
+                    for zone_name, zone in zonal.zones.items():
+                        zone_data.append({
+                            'Orientierung': zone.orientation,
+                            'Ø Temp. [°C]': f"{zone.avg_temperature_c:.1f}",
+                            'Min/Max [°C]': f"{zone.min_temperature_c:.1f} / {zone.max_temperature_c:.1f}",
+                            'Heizung [kWh]': f"{zone.heating_kwh:.0f}",
+                            'Kühlung [kWh]': f"{zone.cooling_kwh:.0f}",
+                            'Solar [kWh]': f"{zone.solar_gains_kwh:.0f}",
+                            'Innere Gewinne [kWh]': f"{zone.internal_gains_kwh:.0f}",
+                        })
+
+                    # Sortiere nach Orientierung
+                    orientations_order = ['North', 'East', 'South', 'West', 'Core']
+                    zone_data.sort(key=lambda x: orientations_order.index(x['Orientierung']) if x['Orientierung'] in orientations_order else 999)
+
+                    import pandas as pd
+                    df_zones = pd.DataFrame(zone_data)
+                    st.dataframe(df_zones, use_container_width=True, hide_index=True)
+
+                    # Erkenntnisse
+                    st.markdown("---")
+                    st.markdown("### 💡 Erkenntnisse aus zonaler Auswertung")
+
+                    # Finde Zone mit höchsten solaren Gewinnen
+                    perimeter_zones = [z for z in zonal.zones.values() if z.orientation != 'Core']
+                    if perimeter_zones:
+                        max_solar_zone = max(perimeter_zones, key=lambda z: z.solar_gains_kwh)
+                        min_solar_zone = min(perimeter_zones, key=lambda z: z.solar_gains_kwh)
+
+                        col1, col2, col3 = st.columns(3)
+
+                        with col1:
+                            st.metric(
+                                "Höchste Solare Gewinne",
+                                f"{max_solar_zone.orientation}",
+                                f"{max_solar_zone.solar_gains_kwh:.0f} kWh"
+                            )
+
+                        with col2:
+                            st.metric(
+                                "Niedrigste Solare Gewinne",
+                                f"{min_solar_zone.orientation}",
+                                f"{min_solar_zone.solar_gains_kwh:.0f} kWh"
+                            )
+
+                        with col3:
+                            delta = max_solar_zone.solar_gains_kwh - min_solar_zone.solar_gains_kwh
+                            st.metric(
+                                "Unterschied",
+                                f"{delta:.0f} kWh",
+                                f"{delta / max_solar_zone.solar_gains_kwh * 100:.0f}%"
+                            )
+
+                    # Solare Gewinne Detail-Chart
+                    st.markdown("### ☀️ Solare Gewinne nach Orientierung")
+                    fig_solar = vis.erstelle_zonale_solar_gewinne_chart(zonal)
+                    st.plotly_chart(fig_solar, use_container_width=True)
+
+                    st.info("""
+                    **Interpretation**:
+                    - Hohe solare Gewinne reduzieren den Heizbedarf (kostenlose Wärme!)
+                    - Aber: Erhöhen potentiell den Kühlbedarf im Sommer
+                    - Optimale Fensterauslegung berücksichtigt Orientierung
+                    """)
+
+            except Exception as e:
+                st.error(f"Fehler beim Laden der zonalen Daten: {e}")
+                st.info("Tipp: Stellen Sie sicher, dass die Simulation erfolgreich war.")
 
     # =============================================================================
     # TAB 6: INPUT SUMMARY

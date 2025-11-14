@@ -416,7 +416,43 @@ def _check_simulation_success(self, err_file: Path) -> bool:
 
 ---
 
-**TOTAL: 11 Variablen genutzt (~5% der verfügbaren!)**
+**TOTAL: 11 Variablen genutzt (~5% der verfügbaren!)** → **UPDATE: Jetzt deutlich mehr durch neue Features!**
+
+### 3.4 Tabular Reports (NEU - 2025-11-14) 🆕
+
+**Vorgefertigte Summary Reports** aus `TabularDataWithStrings`:
+- `AnnualBuildingUtilityPerformanceSummary` → End Uses, Site/Source Energy
+- `HVACSizingSummary` → Design Loads (mit Fallback auf Zeitreihen)
+- `EnvelopeSummary` → Gebäudehülle-Performance
+- `SizingPeriod:DesignDay` → Design Days
+
+**Vorteil:** Instant-Zugriff auf aggregierte Daten, keine 8760-Werte Summierung!
+
+### 3.5 Zonale Auswertung (NEU - 2025-11-14) 🆕
+
+**Zonale Daten** aus `ReportVariableData` für alle 5 Zonen:
+- Temperaturen (AVG/MIN/MAX pro Zone)
+- Heiz-/Kühllasten (SUM pro Zone)
+- Solare Gewinne (SUM pro Zone) → **Orientierungseffekt sichtbar!**
+- Innere Gewinne (Lights + Equipment + People pro Zone)
+
+**Query-Pattern:**
+```sql
+SELECT d.KeyValue as ZoneName, d.VariableName, AVG(v.VariableValue), ...
+FROM ReportVariableData v
+JOIN ReportVariableDataDictionary d ON ...
+WHERE d.KeyValue IN ('PERIMETER_NORTH_F1', 'PERIMETER_EAST_F1', ...)
+GROUP BY d.KeyValue, d.VariableName
+```
+
+**Beispiel-Erkenntnis:** Solare Gewinne Nord 1.074 kWh > West 241 kWh (4,5× Unterschied!)
+
+---
+
+**UPDATE: Datenpotential-Nutzung**
+- **Vorher:** ~5% (11 von 200+ Variablen)
+- **Jetzt:** ~15-20% durch Tabular Reports + Zonale Auswertung
+- **Noch ungenutzt:** ~80-85% (PMV/PPD, Surface Temps, HVAC Details, etc.)
 
 ---
 

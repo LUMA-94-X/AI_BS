@@ -965,8 +965,128 @@ class EnvelopePerformance:
 - ✅ Gebäudehülle-Performance aus Simulation
 
 **Known Issues (durch Tabular Reports aufgedeckt):**
-- 🐛 Design Loads sind 0 (IDF Problem oder fehlende Output:Variables)
-- 🐛 Interne Lasten sehr hoch (Lights/Equipment W/m² zu hoch konfiguriert)
+- ✅ ~~Design Loads sind 0~~ **FIXED** - Fallback auf Zeitreihen implementiert
+- ✅ ~~Interne Lasten sehr hoch~~ **FIXED** - Realistische Schedules (30-40% OIB RL6)
+
+---
+
+### 3.5 Zonale Auswertung 🆕
+
+**Zweck:** Vergleich der 5 Gebäudezonen (Nord/Ost/Süd/West/Kern) für Orientierungseffekte.
+
+**Datenklassen:**
+
+```python
+@dataclass
+class ZoneData:
+    zone_name: str
+    orientation: str  # North, East, South, West, Core
+
+    # Temperaturen
+    avg_temperature_c: float
+    min_temperature_c: float
+    max_temperature_c: float
+
+    # Lasten [kWh]
+    heating_kwh: float
+    cooling_kwh: float
+
+    # Gewinne [kWh]
+    solar_gains_kwh: float  # Zeigt Orientierungseffekt!
+    internal_gains_kwh: float
+    lights_kwh: float
+    equipment_kwh: float
+    people_kwh: float
+
+@dataclass
+class ZonalComparison:
+    zones: Dict[str, ZoneData]
+
+    # Properties für einfachen Zugriff
+    @property
+    def north_zone(self) -> Optional[ZoneData]
+    def east_zone(self) -> Optional[ZoneData]
+    def south_zone(self) -> Optional[ZoneData]
+    def west_zone(self) -> Optional[ZoneData]
+    def core_zone(self) -> Optional[ZoneData]
+```
+
+**Parser-Methode:**
+
+```python
+def get_zonal_comparison(self) -> ZonalComparison:
+    """Extrahiert zonale Daten aus Zeitreihen-Daten."""
+    # SQL-Query für alle Zonen
+    query = """
+    SELECT
+        d.KeyValue as ZoneName,
+        d.VariableName,
+        AVG(v.VariableValue) as AvgValue,
+        MIN(v.VariableValue) as MinValue,
+        MAX(v.VariableValue) as MaxValue,
+        SUM(v.VariableValue) as SumValue
+    FROM ReportVariableData v
+    JOIN ReportVariableDataDictionary d
+        ON v.ReportVariableDataDictionaryIndex = d.ReportVariableDataDictionaryIndex
+    WHERE d.KeyValue IN ('PERIMETER_NORTH_F1', 'PERIMETER_EAST_F1', ...)
+      AND (d.VariableName LIKE '%Temperature%'
+           OR d.VariableName LIKE '%Heating Rate%'
+           OR d.VariableName LIKE '%Windows Total Heat Gain%'
+           ...)
+    GROUP BY d.KeyValue, d.VariableName
+    """
+```
+
+**Visualisierung:**
+
+1. **`erstelle_zonalen_vergleich()`** - 4-Subplot Dashboard:
+   - Subplot 1: Durchschnittstemperaturen [°C]
+   - Subplot 2: Solare Gewinne [kWh] (Orientierungseffekt!)
+   - Subplot 3: Innere Gewinne [kWh]
+   - Subplot 4: Heiz-/Kühllasten [kWh]
+   - Orientierungsspezifische Farben (Blau=Nord, Orange=Süd, etc.)
+
+2. **`erstelle_zonale_solar_gewinne_chart()`** - Detail-Chart:
+   - Bar Chart sortiert nach solaren Gewinnen (absteigend)
+   - Nur Perimeter-Zonen (nicht Kern)
+   - Zeigt Orientierungseffekt deutlich
+
+**UI-Integration (04_Ergebnisse.py):**
+
+- Tab "🏗️ Zonenauswertung" (Tab 5)
+- **Features**:
+  - Zonaler Vergleich Dashboard (4 Subplots)
+  - Detaillierte Zonen-Metriken (Tabelle)
+  - Erkenntnisse: Höchste/Niedrigste Solare Gewinne + Delta
+  - Solare Gewinne Detail-Chart
+  - Interpretation-Hinweise
+- **Verfügbarkeit**: Nur für 5-Zone-Modelle
+- **Fallback**: SimpleBox zeigt Info-Text mit Erklärung
+
+**Erkenntnisse aus Testdaten:**
+
+```
+Zone  | Ø Temp | Heizung | Solare Gewinne | Innere Gewinne
+------|--------|---------|----------------|----------------
+North |  24.3°C|    0 kWh|     1.074 kWh  |      5.740 kWh
+South |  23.5°C|    0 kWh|       716 kWh  |      5.740 kWh
+East  |  24.2°C|    0 kWh|       303 kWh  |      1.454 kWh
+West  |  24.1°C|    0 kWh|       241 kWh  |      1.454 kWh
+Core  |  25.0°C|    0 kWh|         0 kWh  |      6.716 kWh
+```
+
+**Vorteile:**
+- ✅ Orientierungseffekte sichtbar (Solar: Nord 4,5× höher als West!)
+- ✅ Daten bereits in SQL verfügbar → Instant-Zugriff
+- ✅ Keine neuen Output:Variables erforderlich
+- ✅ Automatische Orientierungserkennung
+- ✅ Quick Win: ~450 Zeilen Code für vollständiges Feature
+
+**Use Cases:**
+- Fensterauslegung optimieren (Orientierung berücksichtigen)
+- Verschattungsstrategien entwickeln
+- Heiz-/Kühllasten zonenspezifisch analysieren
+- HVAC-Zonierung validieren
 
 ---
 

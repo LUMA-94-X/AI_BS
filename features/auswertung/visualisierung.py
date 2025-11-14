@@ -9,7 +9,7 @@ import pandas as pd
 
 from features.auswertung.sql_parser import EnergyPlusSQLParser
 from features.auswertung.kpi_rechner import GebaeudeKennzahlen, ErweiterteKennzahlen
-from features.auswertung.tabular_reports import EndUseSummary, HVACSizing, SiteSourceEnergy
+from features.auswertung.tabular_reports import EndUseSummary, HVACSizing, SiteSourceEnergy, ZonalComparison
 
 
 class ErgebnisVisualisierer:
@@ -828,5 +828,215 @@ class ErgebnisVisualisierer:
         fig.update_yaxes(title_text="Last [kW]", row=1, col=2)
         fig.update_yaxes(title_text="Energie [kWh]", row=2, col=1)
         fig.update_yaxes(title_text="Energie [kWh]", row=2, col=2)
+
+        return fig
+
+    def erstelle_zonalen_vergleich(
+        self,
+        zonal: ZonalComparison,
+        titel: str = "Zonaler Vergleich: Nord/Ost/Süd/West/Kern"
+    ) -> go.Figure:
+        """
+        Erstellt 4-Subplot Dashboard für zonalen Vergleich.
+
+        Args:
+            zonal: ZonalComparison Objekt
+            titel: Titel des Dashboards
+
+        Returns:
+            Plotly Figure mit 4 Subplots
+        """
+        # Sortiere Zonen nach Orientierung
+        orientations = ['North', 'East', 'South', 'West', 'Core']
+        zones_sorted = []
+        for orientation in orientations:
+            for zone in zonal.zones.values():
+                if zone.orientation == orientation:
+                    zones_sorted.append(zone)
+                    break
+
+        if not zones_sorted:
+            # Fallback: Leeres Chart
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Keine zonalen Daten verfügbar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=16)
+            )
+            return fig
+
+        zone_names = [z.orientation for z in zones_sorted]
+        colors_by_orientation = {
+            'North': '#3498db',  # Blau (kalt)
+            'East': '#e74c3c',   # Rot (Morgensonne)
+            'South': '#f39c12',  # Orange (viel Sonne)
+            'West': '#e67e22',   # Dunkles Orange (Abendsonne)
+            'Core': '#95a5a6'    # Grau (keine Sonne)
+        }
+
+        # Erstelle 2x2 Subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                'Durchschnittstemperaturen',
+                'Solare Gewinne (Orientierungseffekt!)',
+                'Innere Gewinne',
+                'Heiz-/Kühllasten'
+            ),
+            specs=[[{"type": "bar"}, {"type": "bar"}],
+                   [{"type": "bar"}, {"type": "bar"}]]
+        )
+
+        # 1. Temperaturen
+        temps_avg = [z.avg_temperature_c for z in zones_sorted]
+        temps_min = [z.min_temperature_c for z in zones_sorted]
+        temps_max = [z.max_temperature_c for z in zones_sorted]
+
+        fig.add_trace(
+            go.Bar(
+                name='Ø Temperatur',
+                x=zone_names,
+                y=temps_avg,
+                marker_color=[colors_by_orientation[z] for z in zone_names],
+                text=[f"{t:.1f}°C" for t in temps_avg],
+                textposition='auto',
+            ),
+            row=1, col=1
+        )
+
+        # 2. Solare Gewinne (zeigt Orientierungseffekt!)
+        solar_gains = [z.solar_gains_kwh for z in zones_sorted]
+        fig.add_trace(
+            go.Bar(
+                name='Solare Gewinne',
+                x=zone_names,
+                y=solar_gains,
+                marker_color=[colors_by_orientation[z] for z in zone_names],
+                text=[f"{s:.0f} kWh" for s in solar_gains],
+                textposition='auto',
+            ),
+            row=1, col=2
+        )
+
+        # 3. Innere Gewinne
+        internal_gains = [z.internal_gains_kwh for z in zones_sorted]
+        fig.add_trace(
+            go.Bar(
+                name='Innere Gewinne',
+                x=zone_names,
+                y=internal_gains,
+                marker_color=[colors_by_orientation[z] for z in zone_names],
+                text=[f"{i:.0f} kWh" for i in internal_gains],
+                textposition='auto',
+            ),
+            row=2, col=1
+        )
+
+        # 4. Heiz-/Kühllasten (Grouped Bar)
+        heating_loads = [z.heating_kwh for z in zones_sorted]
+        cooling_loads = [z.cooling_kwh for z in zones_sorted]
+
+        fig.add_trace(
+            go.Bar(
+                name='Heizlast',
+                x=zone_names,
+                y=heating_loads,
+                marker_color='#FF6B6B',
+                text=[f"{h:.0f}" for h in heating_loads],
+                textposition='auto',
+            ),
+            row=2, col=2
+        )
+        fig.add_trace(
+            go.Bar(
+                name='Kühllast',
+                x=zone_names,
+                y=cooling_loads,
+                marker_color='#4ECDC4',
+                text=[f"{c:.0f}" for c in cooling_loads],
+                textposition='auto',
+            ),
+            row=2, col=2
+        )
+
+        # Layout
+        fig.update_layout(
+            title_text=titel,
+            height=800,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+
+        # Y-Achsen Beschriftungen
+        fig.update_yaxes(title_text="Temperatur [°C]", row=1, col=1)
+        fig.update_yaxes(title_text="Energie [kWh]", row=1, col=2)
+        fig.update_yaxes(title_text="Energie [kWh]", row=2, col=1)
+        fig.update_yaxes(title_text="Energie [kWh]", row=2, col=2)
+
+        return fig
+
+    def erstelle_zonale_solar_gewinne_chart(
+        self,
+        zonal: ZonalComparison
+    ) -> go.Figure:
+        """
+        Erstellt detaillierten Chart für solare Gewinne (Orientierungseffekt).
+
+        Args:
+            zonal: ZonalComparison Objekt
+
+        Returns:
+            Plotly Figure (Bar Chart)
+        """
+        # Nur Perimeter-Zonen (nicht Kern)
+        perimeter_zones = [z for z in zonal.zones.values() if z.orientation != 'Core']
+
+        if not perimeter_zones:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Keine Perimeter-Zonen verfügbar",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            return fig
+
+        # Sortiere nach solaren Gewinnen (absteigend)
+        perimeter_zones.sort(key=lambda z: z.solar_gains_kwh, reverse=True)
+
+        zone_names = [z.orientation for z in perimeter_zones]
+        solar_gains = [z.solar_gains_kwh for z in perimeter_zones]
+
+        colors = {
+            'North': '#3498db',
+            'East': '#e74c3c',
+            'South': '#f39c12',
+            'West': '#e67e22'
+        }
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=zone_names,
+                y=solar_gains,
+                marker_color=[colors[z] for z in zone_names],
+                text=[f"{s:.1f} kWh" for s in solar_gains],
+                textposition='auto',
+            )
+        )
+
+        fig.update_layout(
+            title="Solare Gewinne nach Orientierung (Perimeter-Zonen)",
+            xaxis_title="Orientierung",
+            yaxis_title="Solare Gewinne [kWh/a]",
+            height=400,
+            showlegend=False
+        )
 
         return fig
