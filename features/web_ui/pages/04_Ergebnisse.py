@@ -1079,7 +1079,7 @@ try:
             try:
                 from features.auswertung.tabular_reports import TabularReportParser
 
-                parser = TabularReportParser(result.sql_path)
+                parser = TabularReportParser(result.sql_file)
                 zonal = parser.get_zonal_comparison()
 
                 if not zonal.zones:
