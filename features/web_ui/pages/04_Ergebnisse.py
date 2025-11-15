@@ -1124,7 +1124,9 @@ try:
 
                     import pandas as pd
                     df_zones = pd.DataFrame(zone_data)
-                    st.dataframe(df_zones, use_container_width=True, hide_index=True)
+
+                    # Verwende st.table() statt st.dataframe() (kein pyarrow erforderlich)
+                    st.table(df_zones)
 
                     # Erkenntnisse
                     st.markdown("---")
