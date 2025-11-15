@@ -1098,7 +1098,7 @@ try:
                     """)
 
                     # Hauptdashboard
-                    fig_zonal = vis.erstelle_zonalen_vergleich(zonal)
+                    fig_zonal = viz.erstelle_zonalen_vergleich(zonal)
                     st.plotly_chart(fig_zonal, use_container_width=True)
 
                     # Detaillierte Zonen-Metriken
@@ -1162,7 +1162,7 @@ try:
 
                     # Solare Gewinne Detail-Chart
                     st.markdown("### ☀️ Solare Gewinne nach Orientierung")
-                    fig_solar = vis.erstelle_zonale_solar_gewinne_chart(zonal)
+                    fig_solar = viz.erstelle_zonale_solar_gewinne_chart(zonal)
                     st.plotly_chart(fig_solar, use_container_width=True)
 
                     st.info("""
