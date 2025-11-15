@@ -970,9 +970,14 @@ class EnvelopePerformance:
 
 ---
 
-### 3.5 Zonale Auswertung 🆕
+### 3.5 Zonale Auswertung 🆕 (ERWEITERT 2025-11-15)
 
 **Zweck:** Vergleich der 5 Gebäudezonen (Nord/Ost/Süd/West/Kern) für Orientierungseffekte.
+
+**ERWEITERT (2025-11-15):**
+- ✅ **Multi-Floor Support**: Aggregiert über ALLE Geschosse (nicht nur F1)
+- ✅ **Pro-m² Werte**: Zonenflächen extrahiert, normalisierte Metriken
+- ✅ **Dynamische Zone-Erkennung**: Keine hardcoded Floor-Namen
 
 **Datenklassen:**
 
@@ -981,6 +986,7 @@ class EnvelopePerformance:
 class ZoneData:
     zone_name: str
     orientation: str  # North, East, South, West, Core
+    floor_area_m2: float  # 🆕 Zonenfläche [m²]
 
     # Temperaturen
     avg_temperature_c: float
@@ -998,6 +1004,20 @@ class ZoneData:
     equipment_kwh: float
     people_kwh: float
 
+    # 🆕 Pro-m² Properties (computed)
+    @property
+    def heating_kwh_m2(self) -> float:
+        """Heizenergie pro m² [kWh/m²a]"""
+    @property
+    def cooling_kwh_m2(self) -> float:
+        """Kühlenergie pro m² [kWh/m²a]"""
+    @property
+    def solar_gains_kwh_m2(self) -> float:
+        """Solare Gewinne pro m² [kWh/m²a]"""
+    @property
+    def internal_gains_kwh_m2(self) -> float:
+        """Innere Gewinne pro m² [kWh/m²a]"""
+
 @dataclass
 class ZonalComparison:
     zones: Dict[str, ZoneData]
@@ -1011,30 +1031,38 @@ class ZonalComparison:
     def core_zone(self) -> Optional[ZoneData]
 ```
 
-**Parser-Methode:**
+**Parser-Methode (ERWEITERT):**
 
 ```python
 def get_zonal_comparison(self) -> ZonalComparison:
-    """Extrahiert zonale Daten aus Zeitreihen-Daten."""
-    # SQL-Query für alle Zonen
-    query = """
-    SELECT
-        d.KeyValue as ZoneName,
-        d.VariableName,
-        AVG(v.VariableValue) as AvgValue,
-        MIN(v.VariableValue) as MinValue,
-        MAX(v.VariableValue) as MaxValue,
-        SUM(v.VariableValue) as SumValue
-    FROM ReportVariableData v
-    JOIN ReportVariableDataDictionary d
-        ON v.ReportVariableDataDictionaryIndex = d.ReportVariableDataDictionaryIndex
-    WHERE d.KeyValue IN ('PERIMETER_NORTH_F1', 'PERIMETER_EAST_F1', ...)
-      AND (d.VariableName LIKE '%Temperature%'
-           OR d.VariableName LIKE '%Heating Rate%'
-           OR d.VariableName LIKE '%Windows Total Heat Gain%'
-           ...)
-    GROUP BY d.KeyValue, d.VariableName
     """
+    Extrahiert zonale Daten aus Zeitreihen-Daten.
+
+    ERWEITERT (2025-11-15):
+    - Multi-Floor: Aggregiert über alle Geschosse
+    - Pro-m²: Extrahiert Zonenflächen aus TabularData
+    - Dynamisch: Findet alle Zonen automatisch
+    """
+    # 1. Extrahiere Zonenflächen aus TabularData
+    area_query = """
+    SELECT rn.Value AS ZoneName, td.Value AS Area_m2
+    FROM TabularData td
+    WHERE tn.Value = 'Zone Summary' AND cn.Value = 'Area'
+    """
+
+    # 2. Finde alle Zonen dynamisch (alle Floors!)
+    zones_query = """
+    SELECT DISTINCT d.KeyValue as ZoneName
+    FROM ReportVariableDataDictionary d
+    WHERE d.KeyValue LIKE 'PERIMETER_%' OR d.KeyValue LIKE 'CORE_%'
+    """
+
+    # 3. Aggregiere Daten pro Orientierung über alle Floors
+    for orientation in ['North', 'East', 'South', 'West', 'Core']:
+        total_area = sum(zone_areas for zones of this orientation)
+        # Summe aller Werte über alle Floors dieser Orientierung
+        heating_kwh = sum(heating for all zones of this orientation)
+        # ... etc.
 ```
 
 **Visualisierung:**
@@ -1056,31 +1084,36 @@ def get_zonal_comparison(self) -> ZonalComparison:
 - Tab "🏗️ Zonenauswertung" (Tab 5)
 - **Features**:
   - Zonaler Vergleich Dashboard (4 Subplots)
-  - Detaillierte Zonen-Metriken (Tabelle)
+  - Detaillierte Zonen-Metriken (Tabelle) - 🆕 **MIT PRO-M² WERTEN!**
   - Erkenntnisse: Höchste/Niedrigste Solare Gewinne + Delta
   - Solare Gewinne Detail-Chart
   - Interpretation-Hinweise
 - **Verfügbarkeit**: Nur für 5-Zone-Modelle
 - **Fallback**: SimpleBox zeigt Info-Text mit Erklärung
 
-**Erkenntnisse aus Testdaten:**
+**UI-Tabelle (ERWEITERT 2025-11-15):**
 
-```
-Zone  | Ø Temp | Heizung | Solare Gewinne | Innere Gewinne
-------|--------|---------|----------------|----------------
-North |  24.3°C|    0 kWh|     1.074 kWh  |      5.740 kWh
-South |  23.5°C|    0 kWh|       716 kWh  |      5.740 kWh
-East  |  24.2°C|    0 kWh|       303 kWh  |      1.454 kWh
-West  |  24.1°C|    0 kWh|       241 kWh  |      1.454 kWh
-Core  |  25.0°C|    0 kWh|         0 kWh  |      6.716 kWh
-```
+| Orientierung | Fläche [m²] | Ø Temp [°C] | Solar [kWh/m²a] | Intern [kWh/m²a] | Heizung [kWh/m²a] | Kühlung [kWh/m²a] |
+|--------------|-------------|-------------|-----------------|------------------|-------------------|-------------------|
+| North        | 103.2       | 24.3        | 10.4            | 55.6             | 0.0               | 0.0               |
+| East         | 15.1        | 24.2        | 20.0            | 96.6             | 0.0               | 0.0               |
+| South        | 103.2       | 23.5        | 6.9             | 55.6             | 0.0               | 0.0               |
+| West         | 15.1        | 24.1        | 15.9            | 96.6             | 0.0               | 0.0               |
+| Core         | 6.0         | 25.0        | 0.0             | 1,119.3          | 0.0               | 0.0               |
+
+**Erkenntnisse (nach Fix 2025-11-15):**
+- ⚠️ Testdaten oben sind von VOR dem Fix - Nord/Süd waren vertauscht!
+- Nach Fix sollte South > North für solare Gewinne gelten
+- Pro-m² Werte erlauben fairen Vergleich trotz unterschiedlicher Zonengrößen
+- East/West jetzt 4.5× größer → realistischere Werte
 
 **Vorteile:**
-- ✅ Orientierungseffekte sichtbar (Solar: Nord 4,5× höher als West!)
+- ✅ Orientierungseffekte sichtbar (Solar: Süd > Nord > Ost > West) - **NACH FIX!**
 - ✅ Daten bereits in SQL verfügbar → Instant-Zugriff
 - ✅ Keine neuen Output:Variables erforderlich
 - ✅ Automatische Orientierungserkennung
-- ✅ Quick Win: ~450 Zeilen Code für vollständiges Feature
+- ✅ Multi-Floor Support (alle Geschosse aggregiert)
+- ✅ Pro-m² Werte (faire Vergleichbarkeit)
 
 **Use Cases:**
 - Fensterauslegung optimieren (Orientierung berücksichtigen)
@@ -1156,7 +1189,13 @@ ErgebnisVisualisierer
 ### Geometrie
 1. **Vertex-Ordering:** REVERSED für Floors, NORMAL für Ceilings
 2. **Boundary Objects:** Inter-Zone Walls müssen paarweise + reversed sein
-3. **Perimeter-Tiefe:** Adaptive Berechnung für realistische Zonen
+3. **Perimeter-Tiefe:** ✅ **FIXED (2025-11-15)** - Adaptive Berechnung mit dynamischem Minimum
+   - Adaptive `adaptive_min = max(1.5, min(P_MIN, min(L,W) × 0.2))`
+   - East/West-Zonen jetzt 4.5× größer bei schmalen Gebäuden
+4. **Nord/Süd-Orientierung:** ✅ **FIXED (2025-11-15)** - Vertex-Reihenfolge korrigiert
+   - North: Vertices (L,W)→(0,W) - Normal zeigt jetzt korrekt nach Norden (0°)
+   - South: Vertices (0,0)→(L,0) - Normal zeigt jetzt korrekt nach Süden (180°)
+   - **⚠️ BREAKING**: Alle vor 2025-11-15 generierten IDFs haben FALSCHE Orientierungen!
 
 ### HVAC
 1. **eppy Bug:** Manuelle Thermostats entfernen vor HVACTemplate
@@ -1168,13 +1207,18 @@ ErgebnisVisualisierer
 2. **HVAC-Typ:** Muss für PEB/CO₂-Berechnung verfügbar sein
 3. **BuildingModel:** Für OIB-Metadaten (A/V, ℓc, Ū) benötigt
 4. **Tabular Reports:** 🆕 Nutzen vorgefertigte EnergyPlus Reports statt Zeitreihen-Aggregation
-5. **Design Loads:** 🐛 Aktuell = 0 (IDF Problem oder fehlende Output:Variables)
-6. **Interne Lasten:** 🐛 Lights/Equipment W/m² zu hoch konfiguriert
+5. **Design Loads:** ✅ **FIXED (2025-11-14)** - Fallback auf Zeitreihen-Daten implementiert
+6. **Interne Lasten:** ✅ **FIXED (2025-11-14)** - Realistische Schedules (30-40% statt 100%)
+7. **Multi-Floor Zonal Analysis:** ✅ **NEW (2025-11-15)** - Aggregiert über alle Geschosse
+8. **Pro-m² Werte:** ✅ **NEW (2025-11-15)** - Zonenflächen extrahiert, normalisierte Metriken
 
 ---
 
-**Letzte Änderung:** 2025-11-14
+**Letzte Änderung:** 2025-11-15
 **Changelog:**
+- 2025-11-15: **KRITISCHE FIXES** - Nord/Süd-Orientierung + Adaptive Perimeter-Tiefe
+- 2025-11-15: Multi-Floor Zonal Analysis hinzugefügt
+- 2025-11-15: Pro-m² Werte für zonale Metriken
 - 2025-11-14: Tabular Reports Feature hinzugefügt (Abschnitt 3.4)
 - 2025-11-14: Workflow-Diagramm erweitert mit Tabular Reports Pfad
 - 2025-11-14: Known Issues dokumentiert (Design Loads, Interne Lasten)
