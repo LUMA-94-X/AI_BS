@@ -227,31 +227,32 @@ class SurfaceGenerator:
         W = geo_solution.width
 
         # North Perimeter - Außenwand an Y=W (Nordseite)
-        # Counter-clockwise vertex order
+        # FIXED: Reversed vertex order so normal points NORTH (0°, +Y direction)
         self._add_exterior_wall(
             idf,
             zone_name=layout.perimeter_north.name,
             wall_name=f"{layout.perimeter_north.name}_Wall_North",
             vertices=[
-                (0, W, z_base),    # V1: Bottom-Left
-                (L, W, z_base),    # V2: Bottom-Right (counter-clockwise!)
-                (L, W, z_top),     # V3: Top-Right
-                (0, W, z_top),     # V4: Top-Left
+                (L, W, z_base),    # V1: Bottom-Right
+                (0, W, z_base),    # V2: Bottom-Left (reversed!)
+                (0, W, z_top),     # V3: Top-Left
+                (L, W, z_top),     # V4: Top-Right
             ],
             orientation=Orientation.NORTH,
             wwr=orientation_wwr.north
         )
 
         # South Perimeter - Außenwand an Y=0 (Südseite)
+        # FIXED: Reversed vertex order so normal points SOUTH (180°, -Y direction)
         self._add_exterior_wall(
             idf,
             zone_name=layout.perimeter_south.name,
             wall_name=f"{layout.perimeter_south.name}_Wall_South",
             vertices=[
-                (L, 0, z_base),    # V1: Bottom-Right (from inside view)
-                (0, 0, z_base),    # V2: Bottom-Left (counter-clockwise!)
-                (0, 0, z_top),     # V3: Top-Left
-                (L, 0, z_top),     # V4: Top-Right
+                (0, 0, z_base),    # V1: Bottom-Left
+                (L, 0, z_base),    # V2: Bottom-Right (reversed!)
+                (L, 0, z_top),     # V3: Top-Right
+                (0, 0, z_top),     # V4: Top-Left
             ],
             orientation=Orientation.SOUTH,
             wwr=orientation_wwr.south

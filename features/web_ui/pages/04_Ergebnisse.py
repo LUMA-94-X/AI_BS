@@ -1103,30 +1103,33 @@ try:
 
                     # Detaillierte Zonen-Metriken
                     st.markdown("---")
-                    st.markdown("### 📋 Detaillierte Zonen-Metriken")
+                    st.markdown("### 📋 Detaillierte Zonen-Metriken (Aggregiert über alle Geschosse)")
 
-                    # Tabelle mit allen Zonen
+                    # Tabelle mit allen Zonen (ERWEITERT: Pro-m² Werte!)
                     zone_data = []
                     for zone_name, zone in zonal.zones.items():
                         zone_data.append({
                             'Orientierung': zone.orientation,
-                            'Ø Temp. [°C]': f"{zone.avg_temperature_c:.1f}",
-                            'Min/Max [°C]': f"{zone.min_temperature_c:.1f} / {zone.max_temperature_c:.1f}",
-                            'Heizung [kWh]': f"{zone.heating_kwh:.0f}",
-                            'Kühlung [kWh]': f"{zone.cooling_kwh:.0f}",
-                            'Solar [kWh]': f"{zone.solar_gains_kwh:.0f}",
-                            'Innere Gewinne [kWh]': f"{zone.internal_gains_kwh:.0f}",
+                            'Fläche [m²]': f"{zone.floor_area_m2:.1f}",
+                            'Ø Temp [°C]': f"{zone.avg_temperature_c:.1f}",
+                            'Solar [kWh/m²a]': f"{zone.solar_gains_kwh_m2:.1f}",
+                            'Intern [kWh/m²a]': f"{zone.internal_gains_kwh_m2:.1f}",
+                            'Heizung [kWh/m²a]': f"{zone.heating_kwh_m2:.1f}",
+                            'Kühlung [kWh/m²a]': f"{zone.cooling_kwh_m2:.1f}",
                         })
 
                     # Sortiere nach Orientierung
                     orientations_order = ['North', 'East', 'South', 'West', 'Core']
                     zone_data.sort(key=lambda x: orientations_order.index(x['Orientierung']) if x['Orientierung'] in orientations_order else 999)
 
-                    import pandas as pd
-                    df_zones = pd.DataFrame(zone_data)
+                    # Markdown-Tabelle (kein pandas/pyarrow erforderlich)
+                    headers = list(zone_data[0].keys())
+                    md_table = "| " + " | ".join(headers) + " |\n"
+                    md_table += "| " + " | ".join(["---"] * len(headers)) + " |\n"
+                    for row in zone_data:
+                        md_table += "| " + " | ".join(str(row[h]) for h in headers) + " |\n"
 
-                    # Verwende st.table() statt st.dataframe() (kein pyarrow erforderlich)
-                    st.table(df_zones)
+                    st.markdown(md_table)
 
                     # Erkenntnisse
                     st.markdown("---")

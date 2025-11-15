@@ -113,9 +113,10 @@ class EnvelopePerformance:
 
 @dataclass
 class ZoneData:
-    """Daten für eine einzelne Zone"""
+    """Daten für eine einzelne Zone (aggregiert über alle Geschosse)"""
     zone_name: str = ""
     orientation: str = ""  # North, East, South, West, Core
+    floor_area_m2: float = 0.0  # Zonenfläche [m²]
 
     # Temperaturen
     avg_temperature_c: float = 0.0
@@ -132,6 +133,27 @@ class ZoneData:
     lights_kwh: float = 0.0
     equipment_kwh: float = 0.0
     people_kwh: float = 0.0
+
+    # Pro-m² Werte (computed properties)
+    @property
+    def heating_kwh_m2(self) -> float:
+        """Heizenergie pro m² [kWh/m²a]"""
+        return self.heating_kwh / self.floor_area_m2 if self.floor_area_m2 > 0 else 0.0
+
+    @property
+    def cooling_kwh_m2(self) -> float:
+        """Kühlenergie pro m² [kWh/m²a]"""
+        return self.cooling_kwh / self.floor_area_m2 if self.floor_area_m2 > 0 else 0.0
+
+    @property
+    def solar_gains_kwh_m2(self) -> float:
+        """Solare Gewinne pro m² [kWh/m²a]"""
+        return self.solar_gains_kwh / self.floor_area_m2 if self.floor_area_m2 > 0 else 0.0
+
+    @property
+    def internal_gains_kwh_m2(self) -> float:
+        """Innere Gewinne pro m² [kWh/m²a]"""
+        return self.internal_gains_kwh / self.floor_area_m2 if self.floor_area_m2 > 0 else 0.0
 
 
 @dataclass
@@ -530,15 +552,46 @@ class TabularReportParser:
         """
         Extrahiert zonale Daten für Vergleich (Nord/Ost/Süd/West/Kern).
 
-        Verwendet Zeitreihen-Daten aus ReportVariableData.
+        ERWEITERT (2025-11-15):
+        - Multi-Floor Support: Aggregiert über alle Geschosse
+        - Pro-m² Werte: Extrahiert Zonenflächen aus TabularData
+        - Dynamische Zone-Erkennung: Keine hardcoded Floor-Namen
 
         Returns:
-            ZonalComparison mit Daten für alle Zonen
+            ZonalComparison mit aggregierten Daten pro Orientierung
         """
         conn = sqlite3.connect(self.sql_file)
         try:
-            # Query für alle Zonen und ihre Variablen
-            query = """
+            # 1. Extrahiere alle Zonenflächen aus TabularData
+            area_query = """
+            SELECT
+                rn.Value AS ZoneName,
+                td.Value AS Area_m2
+            FROM TabularData td
+            LEFT JOIN Strings rs ON td.ReportNameIndex = rs.StringIndex
+            LEFT JOIN Strings tn ON td.TableNameIndex = tn.StringIndex
+            LEFT JOIN Strings rn ON td.RowNameIndex = rn.StringIndex
+            LEFT JOIN Strings cn ON td.ColumnNameIndex = cn.StringIndex
+            WHERE rs.Value = 'InputVerificationandResultsSummary'
+              AND tn.Value = 'Zone Summary'
+              AND cn.Value = 'Area'
+              AND rn.Value NOT LIKE '%Total%'
+            """
+            df_areas = pd.read_sql_query(area_query, conn)
+            zone_areas = {row['ZoneName']: float(row['Area_m2']) for _, row in df_areas.iterrows()}
+
+            # 2. Finde alle Zonen-Namen dynamisch (Perimeter + Core, alle Floors)
+            zones_query = """
+            SELECT DISTINCT d.KeyValue as ZoneName
+            FROM ReportVariableDataDictionary d
+            WHERE d.KeyValue LIKE 'PERIMETER_%' OR d.KeyValue LIKE 'CORE_%'
+            """
+            df_zones = pd.read_sql_query(zones_query, conn)
+            all_zone_names = [row['ZoneName'] for _, row in df_zones.iterrows()]
+
+            # 3. Query für alle Zonen (alle Floors)
+            zone_list_str = "'" + "', '".join(all_zone_names) + "'"
+            query = f"""
             SELECT
                 d.KeyValue as ZoneName,
                 d.VariableName,
@@ -549,7 +602,7 @@ class TabularReportParser:
             FROM ReportVariableData v
             JOIN ReportVariableDataDictionary d
                 ON v.ReportVariableDataDictionaryIndex = d.ReportVariableDataDictionaryIndex
-            WHERE d.KeyValue IN ('PERIMETER_NORTH_F1', 'PERIMETER_EAST_F1', 'PERIMETER_SOUTH_F1', 'PERIMETER_WEST_F1', 'CORE_F1')
+            WHERE d.KeyValue IN ({zone_list_str})
               AND (
                   d.VariableName LIKE '%Zone Mean Air Temperature%'
                   OR d.VariableName LIKE '%Ideal Loads Zone Total Heating Rate%'
@@ -567,7 +620,7 @@ class TabularReportParser:
             if df.empty:
                 return ZonalComparison(zones={})
 
-            # Parse Orientierung aus ZoneName
+            # Helper: Parse Orientierung aus ZoneName
             def get_orientation(zone_name: str) -> str:
                 zone_lower = zone_name.lower()
                 if 'north' in zone_lower:
@@ -582,43 +635,64 @@ class TabularReportParser:
                     return 'Core'
                 return 'Unknown'
 
-            # Konvertierungsfaktor: Timestep-Daten zu kWh
-            # EnergyPlus speichert Energy in J, Rate in W
-            # Annahme: 8760 Timesteps pro Jahr, 1h pro Timestep
-            J_TO_KWH = 1 / 3600000.0  # 1 J = 1/3600000 kWh
+            # 4. Aggregiere Daten pro Orientierung (über alle Floors)
+            J_TO_KWH = 1 / 3600000.0  # J → kWh
 
-            zones_data = {}
-
+            # Group by orientation
+            orientation_groups = {}
             for zone_name in df['ZoneName'].unique():
-                zone_df = df[df['ZoneName'] == zone_name]
+                orientation = get_orientation(zone_name)
+                if orientation not in orientation_groups:
+                    orientation_groups[orientation] = []
+                orientation_groups[orientation].append(zone_name)
 
-                # Helper: Wert extrahieren
-                def get_val(var_pattern: str, stat: str = 'AvgValue') -> float:
-                    row = zone_df[zone_df['VariableName'].str.contains(var_pattern, na=False)]
-                    if row.empty:
-                        return 0.0
-                    return float(row.iloc[0][stat])
+            # Aggregiere pro Orientierung
+            zones_data = {}
+            for orientation, zone_names_list in orientation_groups.items():
+                # Filter für diese Orientierung
+                df_orient = df[df['ZoneName'].isin(zone_names_list)]
+
+                # Gesamtfläche dieser Orientierung
+                total_area = sum(zone_areas.get(zn, 0.0) for zn in zone_names_list)
+
+                # Helper: Aggregiere Werte über alle Zonen dieser Orientierung
+                def agg_val(var_pattern: str, stat: str, agg_func) -> float:
+                    """Aggregiere über alle Zonen dieser Orientierung"""
+                    values = []
+                    for zn in zone_names_list:
+                        zone_df = df_orient[df_orient['ZoneName'] == zn]
+                        row = zone_df[zone_df['VariableName'].str.contains(var_pattern, na=False)]
+                        if not row.empty:
+                            values.append(float(row.iloc[0][stat]))
+                    return agg_func(values) if values else 0.0
+
+                # Temperaturen: Durchschnitt über alle Zonen
+                avg_temp = agg_val('Zone Mean Air Temperature', 'AvgValue', lambda v: sum(v)/len(v))
+                # Min/Max: Global über alle Zonen
+                min_temp = agg_val('Zone Mean Air Temperature', 'MinValue', min)
+                max_temp = agg_val('Zone Mean Air Temperature', 'MaxValue', max)
+
+                # Lasten & Gewinne: SUMME über alle Zonen
+                heating_kwh = agg_val('Heating Rate', 'SumValue', sum) / 1000.0
+                cooling_kwh = agg_val('Cooling Rate', 'SumValue', sum) / 1000.0
+                solar_gains_kwh = agg_val('Windows Total Heat Gain Energy', 'SumValue', sum) * J_TO_KWH
+                lights_kwh = agg_val('Lights Total Heating Energy', 'SumValue', sum) * J_TO_KWH
+                equipment_kwh = agg_val('Electric Equipment Total Heating Energy', 'SumValue', sum) * J_TO_KWH
+                people_kwh = agg_val('People Total Heating Energy', 'SumValue', sum) * J_TO_KWH
 
                 zone_data = ZoneData(
-                    zone_name=zone_name,
-                    orientation=get_orientation(zone_name),
-
-                    # Temperaturen (°C)
-                    avg_temperature_c=get_val('Zone Mean Air Temperature', 'AvgValue'),
-                    min_temperature_c=get_val('Zone Mean Air Temperature', 'MinValue'),
-                    max_temperature_c=get_val('Zone Mean Air Temperature', 'MaxValue'),
-
-                    # Lasten: Rate (W) → kWh
-                    # SUM(Rate in W) / Timesteps per hour / 1000 → kWh
-                    # Bei hourly timesteps: SUM(W) / 1000 → kWh
-                    heating_kwh=get_val('Heating Rate', 'SumValue') / 1000.0,  # Sum of W → kWh
-                    cooling_kwh=get_val('Cooling Rate', 'SumValue') / 1000.0,  # Sum of W → kWh
-
-                    # Gewinne: Energy (J) → kWh
-                    solar_gains_kwh=get_val('Windows Total Heat Gain Energy', 'SumValue') * J_TO_KWH,
-                    lights_kwh=get_val('Lights Total Heating Energy', 'SumValue') * J_TO_KWH,
-                    equipment_kwh=get_val('Electric Equipment Total Heating Energy', 'SumValue') * J_TO_KWH,
-                    people_kwh=get_val('People Total Heating Energy', 'SumValue') * J_TO_KWH,
+                    zone_name=f"{orientation} (all floors)",
+                    orientation=orientation,
+                    floor_area_m2=total_area,
+                    avg_temperature_c=avg_temp,
+                    min_temperature_c=min_temp,
+                    max_temperature_c=max_temp,
+                    heating_kwh=heating_kwh,
+                    cooling_kwh=cooling_kwh,
+                    solar_gains_kwh=solar_gains_kwh,
+                    lights_kwh=lights_kwh,
+                    equipment_kwh=equipment_kwh,
+                    people_kwh=people_kwh,
                 )
 
                 zone_data.internal_gains_kwh = (
@@ -627,12 +701,14 @@ class TabularReportParser:
                     zone_data.people_kwh
                 )
 
-                zones_data[zone_name] = zone_data
+                zones_data[orientation] = zone_data
 
             return ZonalComparison(zones=zones_data)
 
         except Exception as e:
             print(f"Warning: Could not extract zonal comparison: {e}")
+            import traceback
+            traceback.print_exc()
             return ZonalComparison(zones={})
         finally:
             conn.close()

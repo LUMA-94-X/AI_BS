@@ -166,15 +166,20 @@ class PerimeterCalculator:
         total_area = building_length * building_width
         core_fraction = core_area / total_area
 
+        # FIXED: Adaptive minimum - für schmale Gebäude kleiner als P_MIN
+        # Absolute Mindesttiefe: 1.5m (funktionale Untergrenze für Perimeter-Zone)
+        adaptive_min = max(1.5, min(self.P_MIN, min(building_length, building_width) * 0.2))
+
         # Iterativ reduzieren falls Kern-Fraktion zu klein
-        while core_fraction < self.MIN_CORE_FRACTION and p_depth > self.P_MIN:
+        while core_fraction < self.MIN_CORE_FRACTION and p_depth > adaptive_min:
             p_depth *= 0.9  # Reduziere um 10%
             core_length = building_length - 2 * p_depth
             core_width = building_width - 2 * p_depth
             core_area = core_length * core_width
             core_fraction = core_area / total_area
 
-        return max(self.P_MIN, p_depth)
+        # Mindestens adaptive_min, aber MIN_CORE_FRACTION hat Priorität
+        return max(adaptive_min, p_depth)
 
     def create_zone_layout(
         self,

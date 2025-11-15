@@ -6,6 +6,83 @@ Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed - 2025-11-15
+
+#### 🔴 KRITISCH: Nord/Süd-Orientierungen vertauscht!
+- **Problem**: Nordzone hatte höhere solare Gewinne als Südzone (1,074 vs 716 kWh/a) - physikalisch unmöglich!
+- **Root Cause**: Surface-Normalen in `surfaces.py` zeigten in falsche Richtung
+  - "North" Wall hatte Azimuth 180° (= Süd!)
+  - "South" Wall hatte Azimuth 0° (= Nord!)
+- **Analyse**: Window-Area Check zeigte South-Fenster war 2.7× größer (5.1 vs 1.9 m²), aber empfing weniger Solar
+- **Fix**: Vertex-Reihenfolge für Nord/Süd-Wände in `surfaces.py` umgekehrt (Zeilen 229-259)
+  - North: Vertices jetzt (L,W) → (0,W) statt (0,W) → (L,W)
+  - South: Vertices jetzt (0,0) → (L,0) statt (L,0) → (0,0)
+- **Ergebnis**: Wand-Normalen zeigen jetzt korrekt (North=0°, South=180°)
+- **Impact**: Alle bisher generierten IDFs haben FALSCHE Orientierungen!
+- **Test erforderlich**: Neue Simulation mit Fix durchführen und Azimuth validieren
+- **Betroffene Datei**: `features/geometrie/generators/components/surfaces.py`
+- **Dokumentiert in**: `PLAUSIBILITAETS_ANALYSE.md` (vollständige Root Cause Analysis)
+
+#### ⚠️ East/West-Zonen unrealistisch schmal
+- **Problem**: East/West-Zonen nur 1.1 m² (0.37 m breit!) bei 3.0 m Perimeter-Tiefe
+- **Root Cause**: Feste Perimeter-Tiefe bei schmalen Gebäuden (6.37 m Breite)
+  - P_MIN = 3.0 m war zu groß → Core-Fraktion-Check reduzierte auf 1.91 m
+  - Aber `max(P_MIN, p_depth)` setzte zurück auf 3.0 m!
+- **Fix**: Adaptive Mindest-Perimeter-Tiefe implementiert (Zeile 169-182)
+  ```python
+  adaptive_min = max(1.5, min(P_MIN, min(L,W) * 0.2))
+  # Für 6.37 m Breite: adaptive_min = 1.5 m (statt 3.0 m)
+  ```
+- **Ergebnis**: East/West-Zonen jetzt **4.5× größer** (5.04 m² statt 1.11 m²)
+  - Perimeter-Tiefe: 1.72 m (statt 3.0 m)
+  - East/West Breite: 2.93 m (statt 0.37 m)
+  - Core-Fraktion: 32.2% (über Minimum 30%)
+- **Betroffene Datei**: `features/geometrie/utils/perimeter_calculator.py`
+
+### Added - 2025-11-15
+
+#### 📐 Plausibilitäts-Analyse (Vollständig dokumentiert!)
+- **Neues Dokument**: `PLAUSIBILITAETS_ANALYSE.md`
+- **Inhalt**: Systematische Analyse aller zonalen Ergebnisse
+  - Window-Area-Berechnung aus IDF-Vertices
+  - Solar Gains/m² Fenster Vergleich
+  - Zone Floor Areas aus Tabular Data
+  - Internal Loads pro m² Analyse
+  - Root Cause Identifikation für alle Bugs
+- **Methodik**: Ultrathink-Mode - vollständige SQL-basierte Verifikation
+- **Ergebnis**: 2 kritische Bugs gefunden, 1 False-Positive ausgeschlossen
+
+#### 🔄 Multi-Floor Zonal Analysis
+- **Erweiterung**: `get_zonal_comparison()` aggregiert jetzt über ALLE Geschosse
+- **Vorher**: Hardcoded auf F1 (`PERIMETER_NORTH_F1`, etc.)
+- **Jetzt**: Dynamische Zone-Erkennung
+  - Findet alle Zonen automatisch (`PERIMETER_%`, `CORE_%`)
+  - Aggregiert Daten pro Orientierung über alle Floors
+  - Extrahiert Zonenflächen aus TabularData
+- **Neue Features**:
+  - `floor_area_m2` Feld in ZoneData
+  - Pro-m² Properties: `heating_kwh_m2`, `cooling_kwh_m2`, `solar_gains_kwh_m2`, `internal_gains_kwh_m2`
+- **Betroffene Datei**: `features/auswertung/tabular_reports.py` (Zeilen 114-714)
+
+#### 📊 Pro-m² Werte in UI
+- **UI-Erweiterung**: Zonale Metriken zeigen jetzt Pro-m² Werte
+- **Neue Tabellen-Spalten**:
+  - `Fläche [m²]` - Gesamtfläche pro Orientierung
+  - `Solar [kWh/m²a]` - Normalisierte solare Gewinne (fair vergleichbar!)
+  - `Intern [kWh/m²a]` - Normalisierte innere Gewinne
+  - `Heizung [kWh/m²a]` - Normalisierter Heizbedarf
+  - `Kühlung [kWh/m²a]` - Normalisierter Kühlbedarf
+- **Vorteil**: Zonen mit unterschiedlichen Flächen (34 m² vs 1 m²) sind jetzt fair vergleichbar
+- **Betroffene Datei**: `features/web_ui/pages/04_Ergebnisse.py` (Zeilen 1104-1119)
+
+### Changed - 2025-11-15
+
+#### 🔧 Perimeter Calculator: Adaptive Constraints
+- **MIN_CORE_FRACTION** hat jetzt Priorität über **P_MIN** bei schmalen Gebäuden
+- Absolute Mindesttiefe: 1.5 m (funktionale Untergrenze)
+- Adaptive Mindesttiefe basierend auf Gebäudedimensionen
+- Iterative Reduktion bis Core-Fraktion ≥ 30% erreicht
+
 ### Fixed - 2025-11-14
 
 #### ⚡ Interne Lasten: Realistische Schedules nach OIB RL6
